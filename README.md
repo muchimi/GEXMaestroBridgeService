@@ -6,7 +6,9 @@ This is meant as an internal component of GremlinEx but can be used standalone v
 
 ## Status and requirements
 
-This is a source implementation, not a precompiled Windows release. The authoring environment had no .NET SDK, Windows, or HIDMaestro binary. Therefore the C# build, C# self-tests, Windows Service lifecycle, and live HID/DirectInput behavior have **not** been executed here. Run the included validation steps on Windows before deploying. Python client checks were run; see VALIDATION.md for exact scope.
+This is a source implementation, not a precompiled Windows release.  The precompiled release is included with GremlinEx. 
+
+The authoring environment had no .NET SDK, Windows, or HIDMaestro binary. Therefore the C# build, C# self-tests, Windows Service lifecycle, and live HID/DirectInput behavior have **not** been executed here. Run the included validation steps on Windows before deploying. Python client checks were run; see VALIDATION.md for exact scope.
 
 - Windows x64 (or publish for Windows ARM64 with a matching complete HIDMaestro build).
 - .NET 10 SDK and a Visual Studio release supporting .NET 10 and Windows SDK 10.0.26100.0.
