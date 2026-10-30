@@ -1,40 +1,86 @@
+/*
+ 
+ Gremlin Ex and the Gremlin Ex Bridge Service for HIDMaestro is (C) EMCS 2026 under GPL 3.0
+
+
+ HIDMaestro is under a MIT Open Source license and (C) 2026 HIDMaestro Contributors
+ Project details: (https://github.com/hifihedgehog/HIDMaestro) and https://hidmaestro.org/
+
+ Please note that GremlinEx does not distribute HIDMaestro components or any of its dependencies. 
+ You must obtain the HIDMaestro SDK and distributables from the HIDMaestro project.
+ 
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+  
+ */
+
 using GEXMaestroBridgeService;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Diagnostics;
+using System.Security.Authentication.ExtendedProtection;
 using System.Security.Principal;
 
-const string ServiceName = "MaestroOscService";
+const string ServiceName = "GEXMaestroBridgeService";
+
+
 
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
     SelfTests.Run();
-    return 0;
+    return;
 }
-
-if (args.Contains("--install", StringComparer.OrdinalIgnoreCase))
+if (args.Any(a => a.Equals("--help", StringComparison.OrdinalIgnoreCase) || a == "-h"))
 {
-    return InstallService(args);
+    Console.WriteLine(StartupArguments.Usage);
+    return;
 }
-
-if (args.Contains("--remove", StringComparer.OrdinalIgnoreCase) || args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase))
+StartupArguments startup;
+try { startup = StartupArguments.Parse(args); }
+catch (ArgumentException ex)
 {
-    return RemoveService();
+    Console.Error.WriteLine(ex.Message);
+    Console.Error.WriteLine(StartupArguments.Usage);
+    Environment.ExitCode = 2;
+    return;
 }
-
-bool mockFlag = args.Contains("--mock", StringComparer.OrdinalIgnoreCase);
-var builder = Host.CreateApplicationBuilder(args.Where(a => !a.Equals("--mock", StringComparison.OrdinalIgnoreCase)).ToArray());
+var builder = Host.CreateApplicationBuilder(startup.HostArguments);
 // An installed service starts in System32. Resolve configuration beside the executable.
 builder.Configuration.SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
     .AddEnvironmentVariables(prefix: "MAESTRO_")
-    .AddCommandLine(args.Where(a => !a.Equals("--mock", StringComparison.OrdinalIgnoreCase)).ToArray());
+    .AddCommandLine(startup.HostArguments);
 builder.Services.AddWindowsService(o => o.ServiceName = ServiceName);
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(180));
 var options = builder.Configuration.GetSection("Osc").Get<OscOptions>() ?? new();
-if (mockFlag) options.Mock = true;
-options.Validate();
+if (startup.Mock) options.Mock = true;
+try
+{
+    var ports = PortPair.Resolve(builder.Configuration, startup);
+    options.ReceivePort = ports.Receive;
+    options.SendPort = ports.Output;
+    options.Validate();
+}
+catch (ArgumentException ex)
+{
+    Console.Error.WriteLine(ex.Message);
+    Console.Error.WriteLine(StartupArguments.Usage);
+    Environment.ExitCode = 2;
+    return;
+}
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<IMaestroBackend>(_ =>
 {
@@ -47,100 +93,3 @@ builder.Services.AddSingleton<IMaestroBackend>(_ =>
 });
 builder.Services.AddHostedService<OscWorker>();
 await builder.Build().RunAsync();
-
-return 0;
-
-static int InstallService(string[] args)
-{
-    if (!IsRunningAsAdministrator())
-    {
-        Console.Error.WriteLine("Installing the service requires an elevated prompt (Run as Administrator).");
-        return 1;
-    }
-
-    string? exePath = Environment.ProcessPath;
-    if (string.IsNullOrWhiteSpace(exePath))
-    {
-        Console.Error.WriteLine("Unable to locate current executable path.");
-        return 1;
-    }
-
-    var serviceArgs = args
-        .Where(a => !a.Equals("--install", StringComparison.OrdinalIgnoreCase))
-        .Where(a => !a.Equals("--remove", StringComparison.OrdinalIgnoreCase))
-        .Where(a => !a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase))
-        .Where(a => !a.Equals("--self-test", StringComparison.OrdinalIgnoreCase))
-        .ToArray();
-
-    var binPath = serviceArgs.Length == 0
-        ? $"\"{exePath}\""
-        : $"\"{exePath}\" {string.Join(' ', serviceArgs)}";
-
-    var create = RunSc($"create {ServiceName} start= auto binPath= \"{binPath}\" DisplayName= \"Maestro OSC Service\"");
-    if (create.ExitCode != 0)
-    {
-        Console.Error.WriteLine(create.Output);
-        return create.ExitCode;
-    }
-
-    _ = RunSc($"description {ServiceName} \"OSC bridge for Maestro controls\"");
-    Console.WriteLine("Service installed.");
-    return 0;
-}
-
-static int RemoveService()
-{
-    if (!IsRunningAsAdministrator())
-    {
-        Console.Error.WriteLine("Removing the service requires an elevated prompt (Run as Administrator).");
-        return 1;
-    }
-
-    _ = RunSc($"stop {ServiceName}");
-    var delete = RunSc($"delete {ServiceName}");
-    if (delete.ExitCode != 0)
-    {
-        Console.Error.WriteLine(delete.Output);
-        return delete.ExitCode;
-    }
-
-    Console.WriteLine("Service removed.");
-    return 0;
-}
-
-static bool IsRunningAsAdministrator()
-{
-    using var identity = WindowsIdentity.GetCurrent();
-    var principal = new WindowsPrincipal(identity);
-    return principal.IsInRole(WindowsBuiltInRole.Administrator);
-}
-
-static (int ExitCode, string Output) RunSc(string arguments)
-{
-    var startInfo = new ProcessStartInfo
-    {
-        FileName = "sc.exe",
-        Arguments = arguments,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true,
-    };
-
-    using var process = Process.Start(startInfo);
-    if (process is null)
-    {
-        return (-1, "Failed to launch sc.exe.");
-    }
-
-    string output = process.StandardOutput.ReadToEnd();
-    string error = process.StandardError.ReadToEnd();
-    process.WaitForExit();
-
-    if (!string.IsNullOrWhiteSpace(error))
-    {
-        output = string.IsNullOrWhiteSpace(output) ? error : $"{output}{Environment.NewLine}{error}";
-    }
-
-    return (process.ExitCode, output);
-}

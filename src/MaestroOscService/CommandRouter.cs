@@ -1,6 +1,6 @@
 /*
  
- Gremlin Ex and the Gremlin Ex Bridge Service for HIDMaestro is (C) EMCS 2026 under a GNU General Public License.
+ Gremlin Ex and the Gremlin Ex Bridge Service for HIDMaestro is (C) EMCS 2026 under GPL 3.0
 
 
  HIDMaestro is under a MIT Open Source license and (C) 2026 HIDMaestro Contributors
