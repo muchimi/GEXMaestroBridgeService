@@ -9,6 +9,7 @@
 *.user
 *.userosscache
 *.sln.docstates
+HIDMaestro.Core.dll
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
