@@ -239,9 +239,9 @@ Run elevated:
 
 ```powershell
 .\scripts\install-service.ps1 -PublishDirectory .\publish
-Get-Service MaestroOscService
-Stop-Service MaestroOscService
-Start-Service MaestroOscService
+Get-Service GEXMaestroBridgeService
+Stop-Service GEXMaestroBridgeService
+Start-Service GEXMaestroBridgeService
 ```
 
 The install script copies to Program Files, restricts write access to Administrators/SYSTEM, secures the ProgramData definitions directory, registers the service and starts it. It does not install a firewall rule because the default listener is loopback. Stop/uninstall an existing deployment before replacing its files. Service restart recreates enabled definitions, while service stop disposes owned controllers.
