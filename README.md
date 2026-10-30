@@ -1,6 +1,8 @@
-# Maestro OSC Service
+# GEX Maestro Bridge Service
 
-A standalone C# Windows Worker Service bridging OSC/UDP to HIDMaestro. Receive on **8010**; reply to **8011**. Includes named console controller profiles and custom DirectInput joysticks with **up to 128 buttons, 8 axes and 4 independent hats**.
+A standalone C# Windows Worker Service bridging OSC/UDP [GremlinEx](https://github.com/muchimi/JoystickGremlinEx) to [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro). Receive on **8010**; reply to **8011**. Includes named console controller profiles and custom DirectInput joysticks with **up to 128 buttons, 8 axes and 4 independent hats**.  
+  
+This is meant as an internal component of GremlinEx but can be used standalone via any OSC enabled application.
 
 ## Status and requirements
 
@@ -258,3 +260,4 @@ Uninstall removes the service registration; published files and saved definition
 - https://github.com/hifihedgehog/HIDMaestro/blob/master/sdk/HIDMaestro.Core/HMGamepadState.cs
 - https://github.com/hifihedgehog/HIDMaestro/blob/master/example/SdkDemo/Program.cs
 - https://opensoundcontrol.stanford.edu/spec-1_0.html
+- https://github.com/muchimi/JoystickGremlinEx
