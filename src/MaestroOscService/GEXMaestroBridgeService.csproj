@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <HidMaestroDll Condition="'$(HidMaestroDll)' == ''">$(MSBuildThisFileDirectory)..\..\lib\HIDMaestro.Core.dll</HidMaestroDll>
+    <Platforms>AnyCPU;x64</Platforms>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
+    <PackageReference Include="System.Management" Version="10.0.0" />
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(MockOnly)' != 'true'">
+    <Reference Include="HIDMaestro.Core"><HintPath>$(HidMaestroDll)</HintPath><Private>true</Private></Reference>
+  </ItemGroup>
+  <PropertyGroup Condition="'$(MockOnly)' == 'true'"><DefineConstants>$(DefineConstants);MOCK_ONLY</DefineConstants></PropertyGroup>
+  <ItemGroup Condition="'$(MockOnly)' == 'true'"><Compile Remove="HidMaestroBackend.cs" /></ItemGroup>
+  <Target Name="CheckHidMaestro" BeforeTargets="ResolveReferences" Condition="'$(MockOnly)' != 'true' and !Exists('$(HidMaestroDll)')">
+    <Error Text="Copy the HIDMaestro 2.x HIDMaestro.Core.dll into lib, or set -p:HidMaestroDll=FULL_PATH. For protocol testing only use -p:MockOnly=true." />
+  </Target>
+</Project>
