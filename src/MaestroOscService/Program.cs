@@ -38,6 +38,11 @@ const string ServiceName = "GEXMaestroBridgeService";
 
 
 
+if (args.Any(a => a.Equals("--version", StringComparison.OrdinalIgnoreCase) || a.Equals("-v", StringComparison.OrdinalIgnoreCase)))
+{
+    Console.WriteLine(typeof(OscWorker).Assembly.GetName().Version?.ToString(3) ?? "unknown");
+    return;
+}
 if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
 {
     SelfTests.Run();
