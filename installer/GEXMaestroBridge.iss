@@ -16,13 +16,16 @@ PrivilegesRequired=admin
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-LicenseFile=..\\licenses\\GPL-3.0.txt
+LicenseFile=..\licenses\GPL-3.0.txt
 DisableProgramGroupPage=yes
+CloseApplications=yes
+RestartApplications=no
 [Files]
 Source: "..\payload\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "configure.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "upgrade.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 [Icons]
-Name: "{autoprograms}\GEX Maestro Bridge Console"; Filename: "{app}\MaestroOscService.exe"; Check: IsConsole
+Name: "{autoprograms}\GEX Maestro Bridge Console"; Filename: "{app}\GEXMaestroBridgeService.exe"; Check: IsConsole
 Name: "{autoprograms}\Uninstall GEX Maestro Bridge"; Filename: "{uninstallexe}"
 [Code]
 var
@@ -30,6 +33,8 @@ var
   ListenPort, SendPort, HostIP: TNewEdit;
   RemoteBox, ServiceBox, DevicesBox, FirewallBox, AnyBox: TNewCheckBox;
   WarningText: TNewStaticText;
+  UpgradePending: Boolean;
+  ExistingService: Boolean;
 
 function IsConsole: Boolean;
 begin
@@ -56,12 +61,15 @@ begin
   ServiceBox.Parent := NetworkPage.Surface;
   ServiceBox.SetBounds(0, 0, 380, 22);
   ServiceBox.Caption := 'Install as Windows Service (otherwise console)';
-  ServiceBox.Checked := True;
+  ExistingService := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\GEXMaestroBridgeService');
+  ServiceBox.Checked := ExistingService or not FileExists(ExpandConstant('{autopf}\GEXMaestroBridge\GEXMaestroBridgeService.exe'));
+  ServiceBox.Enabled := not FileExists(ExpandConstant('{autopf}\GEXMaestroBridge\GEXMaestroBridgeService.exe'));
   DevicesBox := TNewCheckBox.Create(NetworkPage);
   DevicesBox.Parent := NetworkPage.Surface;
   DevicesBox.SetBounds(0, 26, 380, 22);
   DevicesBox.Caption := 'Request default GEX 1-4 devices (not yet implemented)';
   DevicesBox.Checked := False;
+  DevicesBox.Enabled := ServiceBox.Enabled;
   RemoteBox := TNewCheckBox.Create(NetworkPage);
   RemoteBox.Parent := NetworkPage.Surface;
   RemoteBox.SetBounds(0, 52, 380, 22);
@@ -109,10 +117,33 @@ begin
   Result := '"' + S + '"';
 end;
 
+function RunUpgrade(Action: String): Boolean;
+var Params: String; ResultCode: Integer;
+begin
+  Params := '-NoProfile -ExecutionPolicy Bypass -File ' +
+    PsQuote(ExpandConstant('{app}\installer\upgrade.ps1')) +
+    ' -InstallDir ' + PsQuote(ExpandConstant('{app}')) +
+    ' -Action ' + Action + ' -Version {#AppVersion}';
+  Result := Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+begin
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var Params, Mode, Remote, Scope, MakeDevices: String; ResultCode: Integer;
 begin
+  if CurStep = ssInstall then begin
+    UpgradePending := FileExists(ExpandConstant('{app}\GEXMaestroBridgeService.exe'));
+    if UpgradePending and not RunUpgrade('prepare') then
+      RaiseException('Could not prepare the existing bridge for upgrade. Close the console or check the service.');
+  end;
   if CurStep = ssPostInstall then begin
+    if UpgradePending then begin
+      if not RunUpgrade('complete') then RaiseException('Upgrade cleanup failed.');
+      exit;
+    end;
     if ServiceBox.Checked then Mode := 'service' else Mode := 'console';
     if RemoteBox.Checked then Remote := 'true' else Remote := 'false';
     if DevicesBox.Checked then MakeDevices := 'true' else MakeDevices := 'false';
@@ -128,11 +159,16 @@ begin
   end;
 end;
 
+procedure DeinitializeSetup();
+begin
+  if UpgradePending and not WizardForm.Finished then RunUpgrade('rollback');
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var R: Integer;
 begin
   if CurUninstallStep = usUninstall then begin
-    Exec('sc.exe', 'stop GEXMaestroBridge', '', SW_HIDE, ewWaitUntilTerminated, R);
+    Exec('sc.exe', 'stop GEXMaestroBridgeService', '', SW_HIDE, ewWaitUntilTerminated, R);
     Exec('sc.exe', 'delete GEXMaestroBridge', '', SW_HIDE, ewWaitUntilTerminated, R);
     Exec('powershell.exe', '-NoProfile -Command "Get-NetFirewallRule -Name ''GEXMaestroBridge-OSC'' -ErrorAction SilentlyContinue | Remove-NetFirewallRule"', '', SW_HIDE, ewWaitUntilTerminated, R);
   end;
