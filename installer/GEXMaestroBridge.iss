@@ -16,6 +16,7 @@ PrivilegesRequired=admin
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+LicenseFile=..\\licenses\\GPL-3.0.txt
 DisableProgramGroupPage=yes
 [Files]
 Source: "..\payload\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
