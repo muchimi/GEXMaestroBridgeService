@@ -25,3 +25,7 @@ Build downloads HIDMaestro v2.1.0, verifies the ZIP hash, publishes a self-conta
 - A GitHub Actions release workflow has not yet been added.
 
 Do not publish this as production-ready until these limitations are resolved and Windows testing passes.
+
+## License packaging
+
+The build script validates and copies all four files from the repository's `licenses/` directory into `payload/licenses/`. The Inno Setup `[Files]` recursive payload entry installs them under `{app}\\licenses`. The wizard also displays the bridge GPL-3.0 license. HIDMaestro's MIT license and third-party notices remain available in the installed licenses folder. Do not delete these files from distribution packages.
