@@ -35,7 +35,8 @@ namespace GEXMaestroBridgeService;
 
 public sealed record StartupArguments(int? ReceivePort, int? OutputPort, bool Mock, string[] HostArguments)
 {
-    public const string Usage = "MaestroOscService.exe [receivePort [outputPort]] [--mock]\n" +
+    public const string Usage = "MaestroOscService.exe --version\n" +
+        "MaestroOscService.exe [receivePort [outputPort]] [--mock]\n" +
         "MaestroOscService.exe [--port receivePort] [--output-port outputPort] [--mock]\n" +
         "Defaults: receive 8010, output 8011. Receive only: output = receive + 1.\n" +
         "Aliases: --receive-port, --send-port, --Osc:ReceivePort, --Osc:SendPort.\n" +
