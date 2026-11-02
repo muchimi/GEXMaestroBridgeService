@@ -1,6 +1,6 @@
 #define AppName "GEX Maestro Bridge"
 #ifndef AppVersion
-#define AppVersion "0.0.0"
+#define AppVersion "0.1.0"
 #endif
 [Setup]
 AppId={{D26DA10A-73A7-482A-A711-6B7E04C8D8A0}
@@ -21,8 +21,8 @@ DisableProgramGroupPage=yes
 CloseApplications=yes
 RestartApplications=no
 [Files]
-Source: "..\payload\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "..\payload\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+Source: "..\dist\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\dist\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "configure.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; Flags: dontcopy
@@ -45,9 +45,14 @@ begin
 end;
 
 function ValidPort(S: String): Boolean;
-var N: Integer;
+var 
+  N: Integer;
 begin
-  Result := TryStrToInt(S, N) and (N >= 1) and (N <= 65535);
+  // StrToIntDef returns -1 if the string is invalid or letters are passed
+  N := StrToIntDef(S, -1);
+  
+  // Now safely evaluate the network port boundaries
+  Result := (N >= 1) and (N <= 65535);
 end;
 
 procedure InitializeWizard;
@@ -58,7 +63,7 @@ begin
   WarningText.SetBounds(0, 8, WarningPage.SurfaceWidth, 180);
   WarningText.AutoSize := False;
   WarningText.WordWrap := True;
-  WarningText.Caption := 'Administrator rights are required to install HIDMaestro driver components, register a Windows Service, and change Windows Firewall rules.' + #13#10#13#10 + 'Console mode does not register a service, but driver and virtual-device operations may still require elevation.' + #13#10#13#10 + 'Service mode runs as LocalSystem. HIDMaestro is a third-party open-source dependency. Cancel if you do not approve these changes.';
+  WarningText.Caption := 'Administrator rights are required to install HIDMaestro driver components, register a Windows Service, and change Windows Firewall rules.' + #13#10#13#10 + 'Console mode does not register a service, but driver and virtual-device operations still requirea elevation.' + #13#10#13#10 + 'Service mode runs as LocalSystem. HIDMaestro is a third-party open-source dependency. Cancel if you do not approve these changes.';
   NetworkPage := CreateCustomPage(WarningPage.ID, 'Operating mode and OSC network', 'Choose ports, remote host, and firewall access');
   ServiceBox := TNewCheckBox.Create(NetworkPage);
   ServiceBox.Parent := NetworkPage.Surface;

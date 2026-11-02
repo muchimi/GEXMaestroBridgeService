@@ -45,8 +45,8 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
 
     public IReadOnlyList<OscMessage> Handle(OscMessage command, string sender)
     {
-
-        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Received command from {sender}: {command.Address} ({command.Arguments.Length} args)");
+        if (Environment.UserInteractive)
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Received command from {sender}: {command.Address} ({command.Arguments.Length} args) [{FormatArguments(command.Arguments)}]");
         if (command.Address.StartsWith("/maestro_axis/", StringComparison.Ordinal) ||
             command.Address.StartsWith("/maestro_button/", StringComparison.Ordinal) ||
             command.Address.StartsWith("/maestro_hat/", StringComparison.Ordinal) ||
@@ -89,9 +89,27 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
             case "/maestro_profiles":
                 return Page(m, id, backend.Profiles().Cast<object>().ToArray(), "/maestro_profile");
             case "/maestro_devices":
-                return Page(m, id, backend.Devices().Cast<object>().ToArray(), "/maestro_device");
+            {
+                var devices = backend.Devices();
+                if (Environment.UserInteractive)
+                {
+                    Console.WriteLine($"/maestro_devices returned {devices.Count} device(s):");
+                    foreach (var d in devices)
+                        Console.WriteLine($"  id={d.Id}, profileId={d.ProfileId}, name={d.Name}, transportIndex={d.TransportIndex}, controllable={d.Controllable}");
+                }
+                return Page(m, id, devices.Cast<object>().ToArray(), "/maestro_device");
+            }
             case "/maestro_definitions":
-                return Page(m, id, _definitions.Definitions().Cast<object>().ToArray(), "/maestro_definition");
+            {
+                var definitions = _definitions.Definitions();
+                if (Environment.UserInteractive)
+                {
+                    Console.WriteLine($"/maestro_definitions returned {definitions.Count} definition(s):");
+                    foreach (var d in definitions)
+                        Console.WriteLine($"  id={d.Id}, kind={d.Kind}, profileId={d.ProfileId}, name={d.Name}, buttons={d.Buttons}, axes={d.Axes}, hats={d.Hats}, vid={d.VendorId}, pid={d.ProductId}, enabled={d.Enabled}");
+                }
+                return Page(m, id, definitions.Cast<object>().ToArray(), "/maestro_definition");
+            }
             case "/maestro_system_devices":
                 return Page(m, id, systemInventory(), "/maestro_system_device");
             case "/maestro_create":
@@ -100,18 +118,35 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                 return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(
                     new(deviceId, "profile", profileId, m.Arguments.Length == 4 ? Text(m, 3) : backend.Profiles().FirstOrDefault(p => p.Id.Equals(profileId, StringComparison.OrdinalIgnoreCase))?.Name ?? profileId))))];
             case "/maestro_create_custom":
-                // params: requestId, deviceId, displayName, buttonCount, axisCount, hatCount, vendorId, productId, overwrite, [, allowGamepad]
-                Count(m, 8);
-                
-                var name = Text(m, 1); 
-                var buttonCount = Integer(m, 2);
-                var axisCount = Integer(m, 3);
-                var hatCount = Integer(m, 4);
-                var vendorId = Integer(m, 5);
-                var productId = Integer(m, 6);
-                var overwrite = Boolean(m, 7);
-                var definition = new DeviceDefinition(name, "custom", name, name, buttonCount, axisCount, hatCount,vendorId, productId);
-                return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(definition, overwrite)))];
+                // params: requestId, deviceId, displayName, buttonCount, axisCount, hatCount [, vendorId, productId, overwrite, allowGamepad]
+                if (m.Arguments.Length is < 6 or > 10)
+                    throw new ArgumentException("Create custom arguments: requestId, deviceId, displayName, buttonCount, axisCount, hatCount [, vendorId, productId, overwrite, allowGamepad]");
+                {
+                    string customId = Text(m, 1);
+                    string customName = Text(m, 2);
+                    int buttonCount = Integer(m, 3);
+                    int axisCount = Integer(m, 4);
+                    int hatCount = Integer(m, 5);
+                    int vendorId = m.Arguments.Length >= 7 ? Integer(m, 6) : 0x001;
+                    int productId = m.Arguments.Length >= 8 ? Integer(m, 7) : 0x001;
+                    bool overwrite = m.Arguments.Length >= 9 && Boolean(m, 8);
+                    var definition = new DeviceDefinition(customId, "custom", "custom-" + customId, customName,
+                        buttonCount, axisCount, hatCount, vendorId, productId);
+                    return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(definition, overwrite)))];
+                }
+
+            case "/maestro_create_gamepad":
+                // params: requestId, deviceId, displayName [, overwrite]
+                if (m.Arguments.Length != 3 && m.Arguments.Length != 4)
+                    throw new ArgumentException("Create gamepad arguments: requestId, deviceId, displayName [, overwrite]");
+                {
+                    string gamepadId = Text(m, 1);
+                    string displayName = Text(m, 2);
+                    bool overwrite = m.Arguments.Length == 4 && Boolean(m, 3);
+                    var definition = new DeviceDefinition(gamepadId, "gamepad", "xbox-360-wireless", displayName);
+                    return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(definition, overwrite)))];
+                }
+
             case "/maestro_activate":
                 Count(m, 2); return [new("/maestro_created", id, ToJson(_definitions.Activate(Text(m, 1))))];
             case "/maestro_remove":
@@ -147,23 +182,37 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                 throw new ArgumentException("Control address must be /maestro_KIND/device/control with zero arguments to read or one value to write");
             string id = BackendValidation.DeviceId(parts[2]);
             string control = parts[3]; bool write = m.Arguments.Length == 1;
+            bool isGamepad = backend.Capabilities(id).Type.Equals("gamepad", StringComparison.OrdinalIgnoreCase);
             object value;
             switch (parts[1])
             {
                 case "maestro_axis":
-                    if (write) backend.Axis(id, control, Number(m, 0));
-                    value = backend.ReadAxis(id, control); break;
+                    if (isGamepad && TryMapGamepadAxisRole(control, out string role))
+                    {
+                        if (write) backend.GamepadAxis(id, role, Number(m, 0));
+                        value = backend.ReadGamepadAxis(id, role);
+                    }
+                    else
+                    {
+                        if (write) backend.Axis(id, control, Number(m, 0));
+                        value = backend.ReadAxis(id, control);
+                    }
+                    break;
                 case "maestro_gamepad_axis":
                     if (write) backend.GamepadAxis(id, control, Number(m, 0));
                     value = backend.ReadGamepadAxis(id, control); break;
                 case "maestro_button":
-                    object selector = int.TryParse(control, System.Globalization.NumberStyles.None,
-                        System.Globalization.CultureInfo.InvariantCulture, out int number) ? number : control;
+                    if (isGamepad && TryMapGamepadDpadDirection(control, out int direction))
+                    {
+                        if (write) backend.Hat(id, 1, ButtonValue(m.Arguments[0]) ? direction : 0);
+                        value = backend.ReadHat(id, 1) == direction ? 1 : 0;
+                        break;
+                    }
+                    object selector = ResolveButtonSelector(control, isGamepad);
                     if (write) backend.Button(id, selector, ButtonValue(m.Arguments[0]));
                     value = backend.ReadButton(id, selector); break;
                 case "maestro_hat":
-                    if (!int.TryParse(control, System.Globalization.NumberStyles.None,
-                        System.Globalization.CultureInfo.InvariantCulture, out int index)) throw new ArgumentException("Hat selector must be an integer index");
+                    int index = ResolveHatIndex(control, isGamepad);
                     if (write)
                     {
                         float position = Number(m, 0);
@@ -181,6 +230,57 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
             return [Error(-1, m.Address, ex is KeyNotFoundException ? "not_found" : ex is ArgumentException ? "bad_arguments" : "backend_error",
                 ex.Message.Length > 1500 ? ex.Message[..1500] : ex.Message)];
         }
+    }
+    private static bool TryMapGamepadAxisRole(string control, out string role)
+    {
+        role = control.ToUpperInvariant() switch
+        {
+            "LX" or "X" => "LX",
+            "LY" or "Y" => "LY",
+            "RX" => "RX",
+            "RY" => "RY",
+            "LT" or "Z" => "LT",
+            "RT" or "RZ" => "RT",
+            _ => ""
+        };
+        return role.Length != 0;
+    }
+    private static object ResolveButtonSelector(string control, bool isGamepad)
+    {
+        if (int.TryParse(control, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out int number)) return number;
+        if (!isGamepad) return control;
+        return control.ToUpperInvariant() switch
+        {
+            "LB" or "L1" => 5,
+            "RB" or "R1" => 6,
+            "BACK" or "SELECT" => 7,
+            "START" => 8,
+            "GUIDE" or "XBOX" => 9,
+            "LS" or "L3" => 10,
+            "RS" or "R3" => 11,
+            _ => control
+        };
+    }
+    private static bool TryMapGamepadDpadDirection(string control, out int direction)
+    {
+        direction = control.ToUpperInvariant() switch
+        {
+            "DPAD_UP" or "DUP" or "UP" => 1,
+            "DPAD_RIGHT" or "DRIGHT" or "RIGHT" => 3,
+            "DPAD_DOWN" or "DDOWN" or "DOWN" => 5,
+            "DPAD_LEFT" or "DLEFT" or "LEFT" => 7,
+            _ => 0
+        };
+        return direction != 0;
+    }
+    private static int ResolveHatIndex(string control, bool isGamepad)
+    {
+        if (int.TryParse(control, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out int index)) return index;
+        if (isGamepad && (control.Equals("hat", StringComparison.OrdinalIgnoreCase) ||
+            control.Equals("dpad", StringComparison.OrdinalIgnoreCase))) return 1;
+        throw new ArgumentException("Hat selector must be an integer index");
     }
     private static bool ButtonValue(object? arg) => arg switch
     {
@@ -230,4 +330,11 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
     };
 
     public static OscMessage Error(int id, string address, string code, string message) => new("/maestro_error", id, address.Length > 512 ? address[..512] : address, code, message.Length > 1500 ? message[..1500] : message);
+
+    private static string FormatArguments(object?[] args) => string.Join(", ", args.Select(a => a switch
+    {
+        null => "null",
+        string s => '"' + s + '"',
+        _ => Convert.ToString(a, System.Globalization.CultureInfo.InvariantCulture) ?? a.ToString() ?? ""
+    }));
 }

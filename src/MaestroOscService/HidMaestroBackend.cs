@@ -116,6 +116,10 @@ public sealed class HidMaestroBackend : IMaestroBackend
         }
         catch { controller.Dispose(); throw; }
     }
+    public DeviceInfo CreateGamepad(string id, string name)
+    {
+        return Create(id, "xbox-360-wireless", name);
+    }
     public void GamepadAxis(string id, string role, float value)
     {
         var d = Get(id); BackendValidation.AxisValue(value);

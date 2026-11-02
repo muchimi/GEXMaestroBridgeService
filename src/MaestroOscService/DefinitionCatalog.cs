@@ -132,8 +132,13 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
         if (devices.Count >= maxDevices && !devices.Any(d => d.Id == id)) throw new InvalidOperationException("Configured active device limit reached");
         if (!_items.ContainsKey(id) && _items.Count >= 256) throw new InvalidOperationException("Definition limit reached (256)");
     }
-    private DeviceInfo ActivateBackend(DeviceDefinition d) => d.Kind == "custom"
-        ? backend.CreateCustom(d.Id, d.Name, d.Buttons, d.Axes, d.Hats, d.VendorId, d.ProductId) : backend.Create(d.Id, d.ProfileId, d.Name);
+    private DeviceInfo ActivateBackend(DeviceDefinition d) => d.Kind switch
+    {
+        "custom" => backend.CreateCustom(d.Id, d.Name, d.Buttons, d.Axes, d.Hats, d.VendorId, d.ProductId),
+        "gamepad" => backend.CreateGamepad(d.Id, d.Name),
+        _ => backend.Create(d.Id, d.ProfileId, d.Name)
+    };
+
     private static void Validate(DeviceDefinition d)
     {
         BackendValidation.DeviceId(d.Id);
@@ -142,6 +147,10 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
         {
             CustomJoystick.Validate(d.Buttons, d.Axes, d.Hats);
             if (string.IsNullOrWhiteSpace(d.Name) || d.Name.Length > 128) throw new ArgumentException("Custom name must have 1..128 characters");
+        }
+        else if (d.Kind == "gamepad")
+        {
+            if (string.IsNullOrWhiteSpace(d.Name) || d.Name.Length > 128) throw new ArgumentException("Gamepad name must have 1..128 characters");
         }
         else if (d.Kind != "profile" || string.IsNullOrWhiteSpace(d.ProfileId)) throw new ArgumentException("Invalid definition kind/profile ID");
     }

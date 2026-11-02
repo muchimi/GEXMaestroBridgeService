@@ -26,6 +26,7 @@
   
  */
 
+using HIDMaestro;
 using System.Management;
 
 namespace GEXMaestroBridgeService;
@@ -45,6 +46,8 @@ public interface IMaestroBackend : IDisposable
     IReadOnlyList<DeviceInfo> Devices();
     DeviceInfo Create(string id, string profileId, string? name = null);
     DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats, int vendorId, int productId);
+    DeviceInfo CreateGamepad(string id, string name);
+
     void GamepadAxis(string id, string role, float value);
     void Remove(string id);
     ProfileInfo Capabilities(string id);
@@ -121,6 +124,8 @@ public sealed class MockBackend : IMaestroBackend
     private readonly Dictionary<string, Device> _devices = new(StringComparer.Ordinal);
     private readonly ProfileInfo _profile = new("mock-gamepad", "Mock gamepad (no hardware)", 0, 0,
         "gamepad", true, 32, ["X", "Y", "Rx", "Ry", "Z", "Rz"], true, 0, 7, null);
+    private readonly ProfileInfo _wirelessProfile = new("xbox-360-wireless", "Xbox 360 Wireless Controller", 0x045E, 0x0719,
+        "gamepad", true, 32, ["X", "Y", "Rx", "Ry", "Z", "Rz"], true, 0, 7, null);
     public void Initialize(bool installDriver) { }
     public IReadOnlyList<ProfileInfo> Profiles() => [_profile];
     public IReadOnlyList<DeviceInfo> Devices() => _devices.Values.Select(d => d.Info).ToArray();
@@ -146,6 +151,16 @@ public sealed class MockBackend : IMaestroBackend
         var profile = custom.Capabilities(id, name);
         var d = new Device(id, profile) { Custom = custom }; _devices.Add(id, d); return d.Info;
     }
+    public DeviceInfo CreateGamepad(string id, string name)
+    {
+        BackendValidation.DeviceId(id);
+        if (_devices.TryGetValue(id, out var existing))
+            return existing.Profile.Id == _wirelessProfile.Id && existing.Profile.Name == name ? existing.Info : throw new InvalidOperationException("Device ID already has a different profile");
+        var d = new Device(id, _wirelessProfile with { Name = name }); _devices.Add(id, d); return d.Info;
+    }
+
+
+
     public void GamepadAxis(string id, string role, float value)
     {
         if (Get(id).Custom is not null) throw new ArgumentException("Use /maestro_axis for custom joysticks");

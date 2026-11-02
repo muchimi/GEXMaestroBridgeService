@@ -12,22 +12,53 @@
     <HidMaestroDll Condition="'$(HidMaestroDll)' == ''">$(MSBuildThisFileDirectory)..\..\lib\HIDMaestro.Core.dll</HidMaestroDll>
     <Platforms>AnyCPU;x64</Platforms>
     <ApplicationIcon>gex.ico</ApplicationIcon>
+    <Title>GEX Maestro Bridge Service</Title>
+    <Copyright>(C) 2026 EMCS</Copyright>
+    <PackageProjectUrl>https://github.com/muchimi/GexBridgeService</PackageProjectUrl>
+    <PackageIcon>gex.ico</PackageIcon>
+    <RepositoryUrl>https://github.com/muchimi/GexBridgeService</RepositoryUrl>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="gex.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\LICENSE.txt">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
     <PackageReference Include="System.Management" Version="10.0.0" />
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="gex.ico">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
   <ItemGroup Condition="'$(MockOnly)' != 'true'">
     <Reference Include="HIDMaestro.Core"><HintPath>$(HidMaestroDll)</HintPath><Private>true</Private></Reference>
   </ItemGroup>
   <PropertyGroup Condition="'$(MockOnly)' == 'true'"><DefineConstants>$(DefineConstants);MOCK_ONLY</DefineConstants></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <IsPublishable>False</IsPublishable>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IsPublishable>False</IsPublishable>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <IsPublishable>False</IsPublishable>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IsPublishable>False</IsPublishable>
+  </PropertyGroup>
   <ItemGroup Condition="'$(MockOnly)' == 'true'"><Compile Remove="HidMaestroBackend.cs" /></ItemGroup>
   <Target Name="CheckHidMaestro" BeforeTargets="ResolveReferences" Condition="'$(MockOnly)' != 'true' and !Exists('$(HidMaestroDll)')">
     <Error Text="Copy the HIDMaestro 2.x HIDMaestro.Core.dll into lib, or set -p:HidMaestroDll=FULL_PATH. For protocol testing only use -p:MockOnly=true." />
+  </Target>
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="if exist &quot;$(SolutionDir)dist&quot; rmdir /S /Q &quot;$(SolutionDir)dist&quot;&#xD;&#xA;xcopy &quot;$(TargetDir)*.*&quot; &quot;$(SolutionDir)dist\&quot; /E /I /Y" />
   </Target>
 </Project>
