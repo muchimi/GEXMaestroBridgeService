@@ -21,7 +21,8 @@ DisableProgramGroupPage=yes
 CloseApplications=yes
 RestartApplications=no
 [Files]
-Source: "..\payload\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\payload\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\payload\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "configure.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; Flags: dontcopy
@@ -35,6 +36,7 @@ var
   RemoteBox, ServiceBox, DevicesBox, FirewallBox, AnyBox: TNewCheckBox;
   WarningText: TNewStaticText;
   UpgradePending: Boolean;
+  UpgradePrepared: Boolean;
   ExistingService: Boolean;
 
 function IsConsole: Boolean;
@@ -138,8 +140,11 @@ begin
   if CurStep = ssInstall then begin
     ExtractTemporaryFile('upgrade.ps1');
     UpgradePending := FileExists(ExpandConstant('{app}\GEXMaestroBridgeService.exe'));
-    if UpgradePending and not RunUpgrade('prepare') then
-      RaiseException('Could not prepare the existing bridge for upgrade. Close the console or check the service.');
+    if UpgradePending then begin
+      if not RunUpgrade('prepare') then
+        RaiseException('Could not prepare the existing bridge for upgrade. Close the console or check the service.');
+      UpgradePrepared := True;
+    end;
   end;
   if CurStep = ssPostInstall then begin
     if UpgradePending then begin
@@ -148,6 +153,7 @@ begin
           RaiseException('Could not restart upgraded bridge service.');
       end;
       if not RunUpgrade('complete') then RaiseException('Upgrade cleanup failed.');
+      UpgradePrepared := False;
       exit;
     end;
     if ServiceBox.Checked then Mode := 'service' else Mode := 'console';
@@ -167,7 +173,7 @@ end;
 
 procedure DeinitializeSetup();
 begin
-  if UpgradePending and not WizardForm.Finished then RunUpgrade('rollback');
+  if UpgradePrepared then RunUpgrade('rollback');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
