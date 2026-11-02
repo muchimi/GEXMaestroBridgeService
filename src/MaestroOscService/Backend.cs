@@ -44,7 +44,7 @@ public interface IMaestroBackend : IDisposable
     IReadOnlyList<ProfileInfo> Profiles();
     IReadOnlyList<DeviceInfo> Devices();
     DeviceInfo Create(string id, string profileId, string? name = null);
-    DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats);
+    DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats, int vendorId, int productId);
     void GamepadAxis(string id, string role, float value);
     void Remove(string id);
     ProfileInfo Capabilities(string id);
@@ -133,7 +133,7 @@ public sealed class MockBackend : IMaestroBackend
         if (profileId != _profile.Id) throw new KeyNotFoundException("Unknown mock profile");
         var d = new Device(id, _profile with { Name = name ?? _profile.Name }); _devices.Add(id, d); return d.Info;
     }
-    public DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats)
+    public DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats, int vendorId, int productId)
     {
         BackendValidation.DeviceId(id);
         var custom = new CustomJoystick(buttons, axes, hats);

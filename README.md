@@ -52,7 +52,7 @@ Use separate build output folders or clean the project when switching between Mo
 ```json
 {
   "Osc": {
-    "ListenAddress": "127.0.0.1",
+    "ListenAddress": "",
     "ReceivePort": 8010,
     "SendPort": 8011,
     "ReplyAddress": "",
@@ -68,7 +68,7 @@ Use separate build output folders or clean the project when switching between Mo
 
 Replies go to the sender's IP at destination UDP port 8011, irrespective of the request's source port. The reply socket has an ephemeral source port. A nonempty ReplyAddress overrides the destination IP for all clients. The other application must bind its reply listener to port 8011. Only one application should own that port per local IP.
 
-Defaults permit local clients only. For LAN access, set ListenAddress to the server's interface IP (or 0.0.0.0), explicitly add the client's IP to AllowedSenders, and allow inbound UDP 8010 for the service executable in Windows Firewall. Configure the client firewall to receive replies on 8011. These are IPv4 literals. This is a local/trusted-LAN control interface, without authentication or encryption.
+By default, an empty ListenAddress resolves to the host's primary IPv4 address at startup. For LAN access from specific clients, explicitly add each client's IP to AllowedSenders and allow inbound UDP 8010 for the service executable in Windows Firewall. Configure the client firewall to receive replies on 8011. These are IPv4 literals. This is a local/trusted-LAN control interface, without authentication or encryption.
 
 ## Control messages: first argument is the value
 

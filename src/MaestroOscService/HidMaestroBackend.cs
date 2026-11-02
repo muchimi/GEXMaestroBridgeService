@@ -92,7 +92,7 @@ public sealed class HidMaestroBackend : IMaestroBackend
         }
         catch { controller.Dispose(); throw; }
     }
-    public DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats)
+    public DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats, int vendorId, int productId)
     {
         BackendValidation.DeviceId(id);
         if (name.Length is < 1 or > 128) throw new ArgumentException("Custom name must have 1..128 characters");
@@ -103,11 +103,11 @@ public sealed class HidMaestroBackend : IMaestroBackend
                 existing.Custom.HatCount == hats && existing.Profile.Name == name) return Describe(existing);
             throw new InvalidOperationException("Device ID has a different definition");
         }
-        var profile = new HMProfileBuilder().Id("custom-" + id).Name(name).Vendor("Maestro OSC")
-            .Vid(0xFEED).Pid(0x8010).ProductString(name).ManufacturerString("Maestro OSC")
+        var profile = new HMProfileBuilder().Id("gex-" + id).Name(name).Vendor("GEX")
+            .Vid((ushort)vendorId).Pid((ushort)productId).ProductString(name).ManufacturerString("GEX")
             .DeviceDescription(name).Type("joystick").Connection("usb").Descriptor(custom.Descriptor()).InputReportSize(custom.ReportSize)
             .DeviceModel("none").XInput("{}").Build();
-        var controller = _context.CreateController(profile, "MaestroOscService:" + id);
+        var controller = _context.CreateController(profile, "GEX:" + id);
         try
         {
             controller.SubmitRawReport(custom.Report());

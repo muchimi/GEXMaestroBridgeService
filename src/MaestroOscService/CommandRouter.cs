@@ -45,6 +45,8 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
 
     public IReadOnlyList<OscMessage> Handle(OscMessage command, string sender)
     {
+
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] Received command from {sender}: {command.Address} ({command.Arguments.Length} args)");
         if (command.Address.StartsWith("/maestro_axis/", StringComparison.Ordinal) ||
             command.Address.StartsWith("/maestro_button/", StringComparison.Ordinal) ||
             command.Address.StartsWith("/maestro_hat/", StringComparison.Ordinal) ||
@@ -98,17 +100,29 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                 return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(
                     new(deviceId, "profile", profileId, m.Arguments.Length == 4 ? Text(m, 3) : backend.Profiles().FirstOrDefault(p => p.Id.Equals(profileId, StringComparison.OrdinalIgnoreCase))?.Name ?? profileId))))];
             case "/maestro_create_custom":
-                Count(m, 6);
-                return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(
-                    new(Text(m, 1), "custom", "custom-" + Text(m, 1), Text(m, 2), Integer(m, 3), Integer(m, 4), Integer(m, 5)))))];
+                // params: requestId, deviceId, displayName, buttonCount, axisCount, hatCount, vendorId, productId, overwrite, [, allowGamepad]
+                Count(m, 8);
+                
+                var name = Text(m, 1); 
+                var buttonCount = Integer(m, 2);
+                var axisCount = Integer(m, 3);
+                var hatCount = Integer(m, 4);
+                var vendorId = Integer(m, 5);
+                var productId = Integer(m, 6);
+                var overwrite = Boolean(m, 7);
+                var definition = new DeviceDefinition(name, "custom", name, name, buttonCount, axisCount, hatCount,vendorId, productId);
+                return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(definition, overwrite)))];
             case "/maestro_activate":
                 Count(m, 2); return [new("/maestro_created", id, ToJson(_definitions.Activate(Text(m, 1))))];
             case "/maestro_remove":
                 Count(m, 2); _definitions.Deactivate(Text(m, 1)); break;
+            case "/maestro_delete_all":
+                Count(m, 3); 
+                return [new("/maestro_all_deleted", id, ToJson(_definitions.DeleteAll(Integer(m,1), Integer(m,2))))];
             case "/maestro_rename":
                 Count(m, 3); return [new("/maestro_renamed", id, ToJson(_definitions.Rename(Text(m, 1), Text(m, 2))))];
             case "/maestro_delete":
-                Count(m, 2); _definitions.Delete(Text(m, 1)); break;
+                Count(m, 2); return [new("/maestro_deleted", id, ToJson(_definitions.Delete(Text(m, 1))))];
             case "/maestro_capabilities":
                 Count(m, 2);
                 return [new("/maestro_capabilities_result", id, Text(m, 1), ToJson(backend.Capabilities(Text(m, 1))))];
@@ -205,5 +219,15 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
         int n => n,
         _ => throw new ArgumentException($"Argument {i} must be a finite OSC float, double or int32")
     };
+    private static bool Boolean(OscMessage m, int i) => m.Arguments[i] switch
+    {
+        bool b => b,
+        int n => n != 0,
+        long n => n != 0,
+        float f when float.IsFinite(f) => f != 0,
+        double d when double.IsFinite(d) => d != 0,
+        _ => throw new ArgumentException($"Argument {i} must be OSC boolean or numeric")
+    };
+
     public static OscMessage Error(int id, string address, string code, string message) => new("/maestro_error", id, address.Length > 512 ? address[..512] : address, code, message.Length > 1500 ? message[..1500] : message);
 }

@@ -34,11 +34,11 @@ namespace GEXMaestroBridgeService;
 
 public sealed class OscOptions
 {
-    public string ListenAddress { get; set; } = "127.0.0.1";
+    public string ListenAddress { get; set; } = "";
     public int ReceivePort { get; set; } = 8010;
     public int SendPort { get; set; } = 8011;
     public string ReplyAddress { get; set; } = "";
-    public string[] AllowedSenders { get; set; } = ["127.0.0.1"];
+    public string[] AllowedSenders { get; set; } = [];
     public int ReceiveBufferBytes { get; set; } = 1048576;
     public int MaxDevices { get; set; } = 16;
     public bool InstallDriverOnStart { get; set; } = true;
@@ -46,14 +46,31 @@ public sealed class OscOptions
     public string DefinitionsPath { get; set; } = "";
     public void Validate()
     {
+        if (ListenAddress.Length == 0)
+        {
+            // grab the current host IP address for the default if not provided
+            ListenAddress = Dns.GetHostEntry(Dns.GetHostName()).AddressList.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)?.ToString() ?? "127.0.0.1";
+        }
         if (!IPAddress.TryParse(ListenAddress, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork)
             throw new ArgumentException("ListenAddress must be an IPv4 literal");
         if (ReceivePort is < 1 or > 65535 || SendPort is < 1 or > 65535 || ReceivePort == SendPort)
             throw new ArgumentException("Receive/send ports must be different and in 1..65535");
         if (ReplyAddress.Length > 0 && (!IPAddress.TryParse(ReplyAddress, out var reply) || reply.AddressFamily != AddressFamily.InterNetwork))
             throw new ArgumentException("ReplyAddress must be blank or an IPv4 literal");
-        if (AllowedSenders.Length == 0 || AllowedSenders.Any(a => !IPAddress.TryParse(a, out var sender) || sender.AddressFamily != AddressFamily.InterNetwork))
-            throw new ArgumentException("AllowedSenders must contain at least one IPv4 literal");
+        // blank send means allow all, if not blank, must be IPv4 literals
+        AllowedSenders = (AllowedSenders ?? [])
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Select(a => a.Trim())
+            .ToArray();
+
+        if (AllowedSenders.Any(a =>
+            !IPAddress.TryParse(a, out var sender) ||
+            sender.AddressFamily != AddressFamily.InterNetwork))
+        {
+            throw new ArgumentException(
+                "AllowedSenders must contain IPv4 literals or be empty to allow all.");
+        }
+        
         if (ReceiveBufferBytes is < 65536 or > 16777216 || MaxDevices is < 1 or > 256)
             throw new ArgumentException("Invalid receive buffer size or device limit");
     }
@@ -67,7 +84,7 @@ public sealed class OscWorker(IMaestroBackend backend, OscOptions options, ILogg
         receiver.Client.ReceiveBufferSize = options.ReceiveBufferBytes;
         // Replies go TO port 8011; this socket's source port is ephemeral.
         using var sender = new UdpClient(AddressFamily.InterNetwork);
-        var allowed = options.AllowedSenders.Select(IPAddress.Parse).ToHashSet();
+        var allowed = options.AllowedSenders.Length == 0 ? null : options.AllowedSenders.Select(IPAddress.Parse).ToHashSet();
         string definitionsPath = options.DefinitionsPath.Length > 0 ? Path.GetFullPath(options.DefinitionsPath) :
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "MaestroOscService",
                 options.Mock ? "devices.mock.json" : "devices.json");
@@ -75,14 +92,15 @@ public sealed class OscWorker(IMaestroBackend backend, OscOptions options, ILogg
         var catalog = new DefinitionCatalog(backend, options.MaxDevices, definitionsPath);
         catalog.Restore();
         var router = new CommandRouter(backend, options.MaxDevices, SystemDevices.Enumerate, catalog);
-        logger.LogInformation("Maestro OSC listening at {Address}:{Port}; reply destination port {ReplyPort}; mock={Mock}",
+        logger.LogInformation("GEX Maestro Bridge listening at {Address}:{Port}; reply destination port {ReplyPort}; mock={Mock}",
             options.ListenAddress, options.ReceivePort, options.SendPort, options.Mock);
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
                 var datagram = await receiver.ReceiveAsync(stoppingToken);
-                if (!allowed.Contains(datagram.RemoteEndPoint.Address)) continue;
+                if (allowed != null && !allowed.Contains(datagram.RemoteEndPoint.Address)) continue;
+               
                 var destination = new IPEndPoint(options.ReplyAddress.Length == 0 ? datagram.RemoteEndPoint.Address
                     : IPAddress.Parse(options.ReplyAddress), options.SendPort);
                 IReadOnlyList<OscMessage> commands;
@@ -106,7 +124,7 @@ public sealed class OscWorker(IMaestroBackend backend, OscOptions options, ILogg
         finally
         {
             // Host DI disposes the backend after the worker stops, removing owned controllers.
-            logger.LogInformation("Maestro OSC listener stopped");
+            logger.LogInformation("GEX Maestro Bridge listener stopped");
         }
     }
     private async Task Reply(OscMessage message, IPEndPoint destination, UdpClient sender, CancellationToken token)

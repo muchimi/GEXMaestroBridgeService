@@ -31,7 +31,7 @@ using System.Text.Json;
 namespace GEXMaestroBridgeService;
 
 public sealed record DeviceDefinition(string Id, string Kind, string ProfileId, string Name,
-    int Buttons = 0, int Axes = 0, int Hats = 0, bool Enabled = true);
+    int Buttons = 0, int Axes = 0, int Hats = 0, int VendorId = 0x001, int ProductId = 0x001, bool Enabled = true);
 
 // Configuration survives restarts; input state intentionally restarts neutral.
 public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, string? path = null)
@@ -56,11 +56,14 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
         _items = loaded;
         foreach (var row in Definitions().Where(d => d.Enabled)) ActivateBackend(row);
     }
-    public DeviceInfo DefineAndActivate(DeviceDefinition definition)
+    public DeviceInfo DefineAndActivate(DeviceDefinition definition, bool overwrite = false)
     {
         Validate(definition);
         if (_items.TryGetValue(definition.Id, out var old) && (old with { Enabled = true }) != (definition with { Enabled = true }))
-            throw new InvalidOperationException("ID has another saved definition; delete it before changing its layout/profile");
+            if (overwrite)
+               Deactivate(definition.Id);
+            else
+                throw new InvalidOperationException("ID has another saved definition; delete it before changing its layout/profile");
         Limit(definition.Id);
         bool wasActive = backend.Devices().Any(d => d.Id == definition.Id);
         var info = ActivateBackend(definition);
@@ -73,6 +76,7 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
         var d = Get(id); return DefineAndActivate(d with { Enabled = true });
     }
     public void Deactivate(string id)
+    // deactivate a device definition; if it is active, remove it from the backend. If the backend removal fails, restore the prior state.
     {
         var d = Get(id);
         // Save first; on hardware failure retain the prior definition where possible.
@@ -80,12 +84,27 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
         try { if (backend.Devices().Any(x => x.Id == id)) backend.Remove(id); }
         catch { Save(_items.Values.Select(x => x.Id == id ? d : x)); throw; }
     }
-    public void Delete(string id)
+
+
+    public bool DeleteAll(int vendor_id, int product_id)
+    // remove all definitions for a given vendor and product and deactivate all devices; if any backend removal fails, restore the prior state
+    {
+
+        var defs = _items.Values.ToArray();
+        Save(Array.Empty<DeviceDefinition>());
+        try { foreach (var d in defs) if (backend.Devices().Any(x => x.Id == d.Id && d.VendorId == (ushort)vendor_id && d.ProductId == (ushort)product_id)) backend.Remove(d.Id); }
+        catch { Save(defs);
+            return false; }
+        return true;
+    }  
+
+    public bool Delete(string id)
     {
         var d = Get(id);
         Save(_items.Values.Where(x => x.Id != id));
         try { if (backend.Devices().Any(x => x.Id == id)) backend.Remove(id); }
-        catch { Save(_items.Values.Append(d)); throw; }
+        catch { Save(_items.Values.Append(d)); return false; }
+        return true;
     }
     public DeviceDefinition Rename(string id, string name)
     {
@@ -114,7 +133,7 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
         if (!_items.ContainsKey(id) && _items.Count >= 256) throw new InvalidOperationException("Definition limit reached (256)");
     }
     private DeviceInfo ActivateBackend(DeviceDefinition d) => d.Kind == "custom"
-        ? backend.CreateCustom(d.Id, d.Name, d.Buttons, d.Axes, d.Hats) : backend.Create(d.Id, d.ProfileId, d.Name);
+        ? backend.CreateCustom(d.Id, d.Name, d.Buttons, d.Axes, d.Hats, d.VendorId, d.ProductId) : backend.Create(d.Id, d.ProfileId, d.Name);
     private static void Validate(DeviceDefinition d)
     {
         BackendValidation.DeviceId(d.Id);

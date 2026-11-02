@@ -7,7 +7,11 @@
     <OutputType>Exe</OutputType>
     <HidMaestroDll Condition="'$(HidMaestroDll)' == ''">$(MSBuildThisFileDirectory)..\..\lib\HIDMaestro.Core.dll</HidMaestroDll>
     <Platforms>AnyCPU;x64</Platforms>
+    <ApplicationIcon>gex.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <Content Include="gex.ico" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />

@@ -67,6 +67,8 @@ builder.Services.AddWindowsService(o => o.ServiceName = ServiceName);
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(180));
 var options = builder.Configuration.GetSection("Osc").Get<OscOptions>() ?? new();
 if (startup.Mock) options.Mock = true;
+if (string.IsNullOrWhiteSpace(options.ListenAddress))
+    options.ListenAddress = NetworkDefaults.ResolveHostIPv4().ToString();
 try
 {
     var ports = PortPair.Resolve(builder.Configuration, startup);

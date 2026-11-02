@@ -46,6 +46,20 @@ public sealed record StartupArguments(int? ReceivePort, int? OutputPort, bool Mo
         int? receive = null, output = null;
         bool mock = false;
         var host = new List<string>();
+        // provide defaults
+        if (args.Length == 0)
+        {
+            // provide defaults if no argument supplied and run on console mode
+            // use default host IP and ports
+            var hostIP = NetworkDefaults.ResolveHostIPv4().ToString();
+            if (Environment.UserInteractive)
+            {
+                Console.WriteLine("No arguments supplied, using default ports 8010 and 8011.");
+                Console.WriteLine("Use --help for usage information.");
+            }
+            return new(8010, 8011, false, new string[] { hostIP?.ToString() ?? "127.0.0.1" });
+        }
+
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i];
