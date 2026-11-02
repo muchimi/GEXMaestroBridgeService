@@ -24,6 +24,7 @@ RestartApplications=no
 Source: "..\payload\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "configure.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "upgrade.ps1"; Flags: dontcopy
 [Icons]
 Name: "{autoprograms}\GEX Maestro Bridge Console"; Filename: "{app}\GEXMaestroBridgeService.exe"; Check: IsConsole
 Name: "{autoprograms}\Uninstall GEX Maestro Bridge"; Filename: "{uninstallexe}"
@@ -121,7 +122,7 @@ function RunUpgrade(Action: String): Boolean;
 var Params: String; ResultCode: Integer;
 begin
   Params := '-NoProfile -ExecutionPolicy Bypass -File ' +
-    PsQuote(ExpandConstant('{app}\installer\upgrade.ps1')) +
+    PsQuote(ExpandConstant('{tmp}\upgrade.ps1')) +
     ' -InstallDir ' + PsQuote(ExpandConstant('{app}')) +
     ' -Action ' + Action + ' -Version {#AppVersion}';
   Result := Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
@@ -135,12 +136,17 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var Params, Mode, Remote, Scope, MakeDevices: String; ResultCode: Integer;
 begin
   if CurStep = ssInstall then begin
+    ExtractTemporaryFile('upgrade.ps1');
     UpgradePending := FileExists(ExpandConstant('{app}\GEXMaestroBridgeService.exe'));
     if UpgradePending and not RunUpgrade('prepare') then
       RaiseException('Could not prepare the existing bridge for upgrade. Close the console or check the service.');
   end;
   if CurStep = ssPostInstall then begin
     if UpgradePending then begin
+      if ExistingService then begin
+        if not Exec('sc.exe', 'start GEXMaestroBridgeService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+          RaiseException('Could not restart upgraded bridge service.');
+      end;
       if not RunUpgrade('complete') then RaiseException('Upgrade cleanup failed.');
       exit;
     end;
