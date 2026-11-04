@@ -32,10 +32,11 @@ using System.Management;
 namespace GEXMaestroBridgeService;
 
 public sealed record ProfileInfo(string Id, string Name, int VendorId, int ProductId,
-    string Type, bool Deployable, int ButtonCount, string[] Axes, bool HasHat,
-    int? HatLogicalMin, int? HatLogicalMax, int[]? ButtonMap, int HatCount = 1, int AddressableButtons = 32);
+    string Type, bool Deployable, int ButtonCount, string[] Axes, bool HasHat, 
+    int? HatLogicalMin, int? HatLogicalMax, int[]? ButtonMap, int HatCount = 1, int AddressableButtons = 32,
+    string Kind = "profile", string? UsedProfileName = null);
 public sealed record DeviceInfo(string Id, string ProfileId, string Name, int TransportIndex,
-    bool Controllable = true);
+    bool Controllable = true, string Type = "unknown", ProfileInfo? MaestroProfile = null);
 public sealed record StateInfo(Dictionary<string, float> Axes, long Buttons, int Hat, int[]? PressedButtons = null, int[]? Hats = null);
 
 // All methods are called by a single serialized command loop.
@@ -112,10 +113,12 @@ public static class SystemDevices
 // Used only for explicit --mock / Mock=true and protocol tests. Does not create hardware.
 public sealed class MockBackend : IMaestroBackend
 {
-    private sealed class Device(string id, ProfileInfo profile)
+    private sealed class Device(string id, ProfileInfo profile, string kind = "profile", string? usedProfileName = null)
     {
-        public DeviceInfo Info = new(id, profile.Id, profile.Name, 0);
+        public DeviceInfo Info = new(id, profile.Id, profile.Name, 0, true, profile.Type, profile);
         public ProfileInfo Profile = profile;
+        public string Kind = kind;
+        public string? UsedProfileName = usedProfileName;
         public Dictionary<string, float> Axes = new(StringComparer.OrdinalIgnoreCase);
         public uint Buttons;
         public int Hat = 0;
@@ -136,7 +139,7 @@ public sealed class MockBackend : IMaestroBackend
         if (_devices.TryGetValue(id, out var existing))
             return existing.Profile.Id == profileId && existing.Profile.Name == (name ?? _profile.Name) ? existing.Info : throw new InvalidOperationException("Device ID already has a different profile");
         if (profileId != _profile.Id) throw new KeyNotFoundException("Unknown mock profile");
-        var d = new Device(id, _profile with { Name = name ?? _profile.Name }); _devices.Add(id, d); return d.Info;
+        var d = new Device(id, _profile with { Name = name ?? _profile.Name }, "profile", _profile.Name); _devices.Add(id, d); return d.Info;
     }
     public DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats, int vendorId, int productId)
     {
@@ -149,14 +152,16 @@ public sealed class MockBackend : IMaestroBackend
             throw new InvalidOperationException("Device ID has a different definition");
         }
         var profile = custom.Capabilities(id, name);
-        var d = new Device(id, profile) { Custom = custom }; _devices.Add(id, d); return d.Info;
+        var d = new Device(id, profile, "custom") { Custom = custom };
+        d.Info = d.Info with { Type = "custom", MaestroProfile = null };
+        _devices.Add(id, d); return d.Info;
     }
     public DeviceInfo CreateGamepad(string id, string name)
     {
         BackendValidation.DeviceId(id);
         if (_devices.TryGetValue(id, out var existing))
             return existing.Profile.Id == _wirelessProfile.Id && existing.Profile.Name == name ? existing.Info : throw new InvalidOperationException("Device ID already has a different profile");
-        var d = new Device(id, _wirelessProfile with { Name = name }); _devices.Add(id, d); return d.Info;
+        var d = new Device(id, _wirelessProfile with { Name = name }, "gamepad", _wirelessProfile.Name); _devices.Add(id, d); return d.Info;
     }
 
 
@@ -168,7 +173,13 @@ public sealed class MockBackend : IMaestroBackend
         Axis(id, axis, value);
     }
     public void Remove(string id) { Get(id); _devices.Remove(id); }
-    public ProfileInfo Capabilities(string id) { var d = Get(id); return d.Custom?.Capabilities(id, d.Profile.Name) ?? d.Profile; }
+    public ProfileInfo Capabilities(string id)
+    {
+        var d = Get(id);
+        if (d.Custom is not null)
+            return d.Custom.Capabilities(id, d.Profile.Name) with { Kind = d.Kind, UsedProfileName = null };
+        return d.Profile with { Kind = d.Kind, UsedProfileName = d.UsedProfileName };
+    }
     public StateInfo State(string id) { var d = Get(id); return d.Custom?.State() ?? new(new(d.Axes), d.Buttons, d.Hat); }
     public void Button(string id, object selector, bool pressed)
     {

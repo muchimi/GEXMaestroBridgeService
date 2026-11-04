@@ -159,8 +159,13 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
             case "/maestro_delete":
                 Count(m, 2); return [new("/maestro_deleted", id, ToJson(_definitions.Delete(Text(m, 1))))];
             case "/maestro_capabilities":
+                /// gets a profile info of the named device capability, or a list of all device capabilities if no name is provided
                 Count(m, 2);
-                return [new("/maestro_capabilities_result", id, Text(m, 1), ToJson(backend.Capabilities(Text(m, 1))))];
+                {
+                    var name = Text(m,1);
+                    return [new("/maestro_capabilities_result", id, name, ToJson(backend.Capabilities(name)))];
+                }
+                
             case "/maestro_state":
                 Count(m, 2);
                 return [new("/maestro_state_result", id, Text(m, 1), ToJson(backend.State(Text(m, 1))))];

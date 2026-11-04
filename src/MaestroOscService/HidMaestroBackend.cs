@@ -32,11 +32,13 @@ namespace GEXMaestroBridgeService;
 
 public sealed class HidMaestroBackend : IMaestroBackend
 {
-    private sealed class Device(string id, HMController controller, HMProfile profile)
+    private sealed class Device(string id, HMController controller, HMProfile profile, string kind = "profile", string? usedProfileName = null)
     {
         public string Id = id;
         public HMController Controller = controller;
         public HMProfile Profile = profile;
+        public string Kind = kind;
+        public string? UsedProfileName = usedProfileName;
         public HashSet<HMAxis> Axes = new(profile.AvailableAxes);
         public HMGamepadState State = new() { Axes = new(), Hat = HMHat.None };
         public int HatDirection = 0;
@@ -54,12 +56,23 @@ public sealed class HidMaestroBackend : IMaestroBackend
     private static ProfileInfo Describe(HMProfile p) => new(p.Id, p.Name, p.VendorId, p.ProductId,
         p.Type, p.IsDeployable, p.ButtonCount, p.AvailableAxes.Select(a => a.ToString()).ToArray(),
         p.HasHat, p.HatLogicalMin, p.HatLogicalMax, p.ButtonMap, LogicalHat(p) ? 1 : 0, 32);
-    private static DeviceInfo Describe(Device d) => new(d.Id, d.Profile.Id, d.Profile.Name, d.Controller.TransportIndex);
+    private static DeviceInfo Describe(Device d)
+    {
+        var profile = Describe(d.Profile);
+        bool fromMaestroProfile = d.Custom is null;
+        return new(d.Id, d.Profile.Id, d.Profile.Name, d.Controller.TransportIndex,
+            true, fromMaestroProfile ? profile.Type : "custom", fromMaestroProfile ? profile : null);
+    }
     private Device Get(string id) => _devices.TryGetValue(id, out var d) ? d : throw new KeyNotFoundException("Unknown service device ID: " + id);
     public IReadOnlyList<ProfileInfo> Profiles() => _context.AllProfiles.Select(Describe).ToArray();
     public IReadOnlyList<DeviceInfo> Devices() => _devices.Values.Select(Describe).ToArray();
     public ProfileInfo Capabilities(string id)
-    { var d = Get(id); return d.Custom?.Capabilities(id, d.Profile.Name) ?? Describe(d.Profile); }
+    {
+        var d = Get(id);
+        if (d.Custom is not null)
+            return d.Custom.Capabilities(id, d.Profile.Name) with { Kind = d.Kind, UsedProfileName = null };
+        return Describe(d.Profile) with { Kind = d.Kind, UsedProfileName = d.UsedProfileName };
+    }
     public StateInfo State(string id)
     {
         var d = Get(id);
@@ -85,7 +98,8 @@ public sealed class HidMaestroBackend : IMaestroBackend
         var controller = _context.CreateController(profile, "MaestroOscService:" + id);
         try
         {
-            var d = new Device(id, controller, profile);
+            string usedProfileName = _context.GetProfile(profile.Id)?.Name ?? profile.Name;
+            var d = new Device(id, controller, profile, "profile", usedProfileName);
             controller.SubmitState(d.State);
             _devices.Add(id, d);
             return Describe(d);
@@ -111,14 +125,18 @@ public sealed class HidMaestroBackend : IMaestroBackend
         try
         {
             controller.SubmitRawReport(custom.Report());
-            var d = new Device(id, controller, profile) { Custom = custom };
+            var d = new Device(id, controller, profile, "custom") { Custom = custom };
             _devices.Add(id, d); return Describe(d);
         }
         catch { controller.Dispose(); throw; }
     }
     public DeviceInfo CreateGamepad(string id, string name)
     {
-        return Create(id, "xbox-360-wireless", name);
+        var info = Create(id, "xbox-360-wireless", name);
+        var d = Get(id);
+        d.Kind = "gamepad";
+        d.UsedProfileName = _context.GetProfile("xbox-360-wireless")?.Name ?? "Xbox 360 Wireless Controller";
+        return info;
     }
     public void GamepadAxis(string id, string role, float value)
     {
