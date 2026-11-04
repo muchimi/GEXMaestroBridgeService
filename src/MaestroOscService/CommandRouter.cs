@@ -34,12 +34,20 @@ using System.Text.Json;
 
 namespace GEXMaestroBridgeService;
 
+/// <summary>
+/// Handles the routing of OSC commands and a reply
+/// </summary>
+/// <param name="backend">the bridge backend interface to HIDMaestro's API</param>
+/// <param name="maxDevices">max number of devices to support, default is 16</param>
+/// <param name="systemInventory">a function that returns the current system inventory</param>
+/// <param name="definitions">holds Maestro device definitions</param>
 public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
     Func<IReadOnlyList<object>> systemInventory, DefinitionCatalog? definitions = null)
 {
     private readonly DefinitionCatalog _definitions = definitions ?? new(backend, maxDevices);
     private sealed record Cached(string Fingerprint, long Created, OscMessage[] Replies);
     private readonly Dictionary<(string Sender, int Id), Cached> _cache = new();
+    private readonly Dictionary<string, bool> _gamepadCache = new(StringComparer.Ordinal);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public static string ToJson(object value) => JsonSerializer.Serialize(value, Json);
 
@@ -115,8 +123,11 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
             case "/maestro_create":
                 if (m.Arguments.Length != 3 && m.Arguments.Length != 4) throw new ArgumentException("Create arguments: requestId, deviceId, profileId [, displayName]");
                 string deviceId = Text(m, 1), profileId = Text(m, 2);
-                return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(
-                    new(deviceId, "profile", profileId, m.Arguments.Length == 4 ? Text(m, 3) : backend.Profiles().FirstOrDefault(p => p.Id.Equals(profileId, StringComparison.OrdinalIgnoreCase))?.Name ?? profileId))))];
+                var createdProfile = _definitions.DefineAndActivate(
+                    new(deviceId, "profile", profileId, m.Arguments.Length == 4 ? Text(m, 3) : backend.Profiles().FirstOrDefault(p => p.Id.Equals(profileId, StringComparison.OrdinalIgnoreCase))?.Name ?? profileId));
+                _gamepadCache[deviceId] = createdProfile.ProfileId.Equals("xbox-360-wireless", StringComparison.OrdinalIgnoreCase) ||
+                    createdProfile.Type.Equals("gamepad", StringComparison.OrdinalIgnoreCase);
+                return [new("/maestro_created", id, ToJson(createdProfile))];
             case "/maestro_create_custom":
                 // params: requestId, deviceId, displayName, buttonCount, axisCount, hatCount [, vendorId, productId, overwrite, allowGamepad]
                 if (m.Arguments.Length is < 6 or > 10)
@@ -132,7 +143,9 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                     bool overwrite = m.Arguments.Length >= 9 && Boolean(m, 8);
                     var definition = new DeviceDefinition(customId, "custom", "custom-" + customId, customName,
                         buttonCount, axisCount, hatCount, vendorId, productId);
-                    return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(definition, overwrite)))];
+                    var createdCustom = _definitions.DefineAndActivate(definition, overwrite);
+                    _gamepadCache[customId] = false;
+                    return [new("/maestro_created", id, ToJson(createdCustom))];
                 }
 
             case "/maestro_create_gamepad":
@@ -144,20 +157,55 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                     string displayName = Text(m, 2);
                     bool overwrite = m.Arguments.Length == 4 && Boolean(m, 3);
                     var definition = new DeviceDefinition(gamepadId, "gamepad", "xbox-360-wireless", displayName);
-                    return [new("/maestro_created", id, ToJson(_definitions.DefineAndActivate(definition, overwrite)))];
+                    var createdGamepad = _definitions.DefineAndActivate(definition, overwrite);
+                    _gamepadCache[gamepadId] = true;
+                    return [new("/maestro_created", id, ToJson(createdGamepad))];
                 }
 
             case "/maestro_activate":
-                Count(m, 2); return [new("/maestro_created", id, ToJson(_definitions.Activate(Text(m, 1))))];
+                Count(m, 2);
+                {
+                    string activateId = Text(m, 1);
+                    var activated = _definitions.Activate(activateId);
+                    _gamepadCache[activateId] = activated.ProfileId.Equals("xbox-360-wireless", StringComparison.OrdinalIgnoreCase) ||
+                        activated.Type.Equals("gamepad", StringComparison.OrdinalIgnoreCase);
+                    return [new("/maestro_created", id, ToJson(activated))];
+                }
             case "/maestro_remove":
-                Count(m, 2); _definitions.Deactivate(Text(m, 1)); break;
+                Count(m, 2);
+                {
+                    string removeId = Text(m, 1);
+                    _definitions.Deactivate(removeId);
+                    _gamepadCache.Remove(removeId);
+                    return [new("/maestro_ok", id, m.Address, removeId)];
+                }
             case "/maestro_delete_all":
-                Count(m, 3); 
-                return [new("/maestro_all_deleted", id, ToJson(_definitions.DeleteAll(Integer(m,1), Integer(m,2))))];
+                Count(m, 3);
+                {
+                    int vendorId = Integer(m, 1);
+                    int productId = Integer(m, 2);
+                    if (!_definitions.DeleteAll(vendorId, productId))
+                        throw new InvalidOperationException("DeleteAll failed to remove one or more active devices");
+                    _gamepadCache.Clear();
+                    return [new("/maestro_ok", id, m.Address, vendorId, productId)];
+                }
             case "/maestro_rename":
-                Count(m, 3); return [new("/maestro_renamed", id, ToJson(_definitions.Rename(Text(m, 1), Text(m, 2))))];
+                Count(m, 3);
+                {
+                    string renameId = Text(m, 1);
+                    var renamed = _definitions.Rename(renameId, Text(m, 2));
+                    _gamepadCache.Remove(renameId);
+                    return [new("/maestro_renamed", id, ToJson(renamed))];
+                }
             case "/maestro_delete":
-                Count(m, 2); return [new("/maestro_deleted", id, ToJson(_definitions.Delete(Text(m, 1))))];
+                Count(m, 2);
+                {
+                    string deleteId = Text(m, 1);
+                    if (!_definitions.Delete(deleteId))
+                        throw new InvalidOperationException("Delete failed to remove the active device");
+                    _gamepadCache.Remove(deleteId);
+                    return [new("/maestro_ok", id, m.Address, deleteId)];
+                }
             case "/maestro_capabilities":
                 /// gets a profile info of the named device capability, or a list of all device capabilities if no name is provided
                 Count(m, 2);
@@ -170,10 +218,15 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                 Count(m, 2);
                 return [new("/maestro_state_result", id, Text(m, 1), ToJson(backend.State(Text(m, 1))))];
             case "/maestro_reset":
-                Count(m, 2); backend.Reset(Text(m, 1)); break;
+                Count(m, 2);
+                {
+                    string resetId = Text(m, 1);
+                    backend.Reset(resetId);
+                    return [new("/maestro_ok", id, m.Address, resetId)];
+                }
             default: throw new ArgumentException("Unknown command: " + m.Address);
         }
-        return [new("/maestro_ok", id, m.Address)];
+        
     }
 
     // Control values always come first; selectors are carried in the OSC address.
@@ -187,7 +240,7 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                 throw new ArgumentException("Control address must be /maestro_KIND/device/control with zero arguments to read or one value to write");
             string id = BackendValidation.DeviceId(parts[2]);
             string control = parts[3]; bool write = m.Arguments.Length == 1;
-            bool isGamepad = backend.Capabilities(id).Type.Equals("gamepad", StringComparison.OrdinalIgnoreCase);
+            bool isGamepad = IsGamepadDevice(id);
             object value;
             switch (parts[1])
             {
@@ -228,6 +281,7 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                     value = backend.ReadHat(id, index); break;
                 default: throw new ArgumentException("Unknown control address");
             }
+            if (write) return [];
             return [new OscMessage(m.Address, value)];
         }
         catch (Exception ex)
@@ -236,6 +290,18 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
                 ex.Message.Length > 1500 ? ex.Message[..1500] : ex.Message)];
         }
     }
+
+    private bool IsGamepadDevice(string id)
+    {
+        if (_gamepadCache.TryGetValue(id, out bool cached)) return cached;
+        var caps = backend.Capabilities(id);
+        bool isGamepad = caps.Kind.Equals("gamepad", StringComparison.OrdinalIgnoreCase) ||
+            caps.Type.Equals("gamepad", StringComparison.OrdinalIgnoreCase) ||
+            caps.Id.Equals("xbox-360-wireless", StringComparison.OrdinalIgnoreCase);
+        _gamepadCache[id] = isGamepad;
+        return isGamepad;
+    }
+
     private static bool TryMapGamepadAxisRole(string control, out string role)
     {
         role = control.ToUpperInvariant() switch

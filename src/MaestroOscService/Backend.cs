@@ -39,7 +39,7 @@ public sealed record DeviceInfo(string Id, string ProfileId, string Name, int Tr
     bool Controllable = true, string Type = "unknown", ProfileInfo? MaestroProfile = null);
 public sealed record StateInfo(Dictionary<string, float> Axes, long Buttons, int Hat, int[]? PressedButtons = null, int[]? Hats = null);
 
-// All methods are called by a single serialized command loop.
+// All HIDMaestro API methods are called by a single serialized command loop.
 public interface IMaestroBackend : IDisposable
 {
     void Initialize(bool installDriver);

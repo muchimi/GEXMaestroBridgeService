@@ -1,39 +1,73 @@
 # GEX Maestro Bridge Service
 
-A standalone C# Windows Worker Service bridging OSC/UDP [GremlinEx](https://github.com/muchimi/JoystickGremlinEx) to [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro). Receive on **8010**; reply to **8011**. Includes named console controller profiles and custom DirectInput joysticks with **up to 128 buttons, 8 axes and 4 independent hats**.  
-  
-This is meant as an internal component of GremlinEx but can be used standalone via any OSC enabled application.
+A standalone C# Windows Worker Service bridging [GremlinEx (GEX)](https://github.com/muchimi/JoystickGremlinEx) to [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro). 
 
-## Status and requirements
 
-This is a source implementation, not a precompiled Windows release.  The precompiled release is included with GremlinEx. 
+The module provides an interface to HID Maestro's API to manage joystick and gamepad devices and to read/write to/from them.
 
-The authoring environment had no .NET SDK, Windows, or HIDMaestro binary. Therefore the C# build, C# self-tests, Windows Service lifecycle, and live HID/DirectInput behavior have **not** been executed here. Run the included validation steps on Windows before deploying. Python client checks were run; see VALIDATION.md for exact scope.
+The interface is based on the standard OSC (Open Sound Control) protocol, for two reasons.  First, OSC support is built-in GremlinEx and lets it easily connect to this bridge to manage virtual HID Maestro devices with existing APIs.  Second, it is lightweight and fast and supports multiple parameter types and handshake information for two way communication.   While this interface is created specifically to bridge GremlinEx Python/C++ platform to HIDMaestro's C#/.NET platform, because it is an implementation of the OSC protocol it can be used with any OSC compatible software for the purpose of sending buttons, hats and axis data to HIDMaestro.  
+
+## Implementation Overview
+
+The module is designed to run as a Windows service, and for diagnostics purposes, can also run as a console application.
+
+Because HID Maestro requires elevated privileges, so does this module. 
+
+The service can be installed on the same machine as GremlinEx, or a different machine.  
+
+No separate installation of HIDMaestro is required as the bridge module encapsulates that functionality.
+
+## OSC configuration
+
+The bridge receives command on the receive UDP port, default **8010**.  The send module (clients will listen to this port for reply messages from the bridge) defaults to **8011**. If the reply ports is not provided, it defaults to the listen port + 1.
+
+## General features
+
+The bridge module implements OSC commands that are all prefixed with **/maestro_**, followed by optional parameters, which can be integer, floating point, or string data, the later is usually using JSON formatted string data to pass complex data back and forth.
+
+## Joystick and Game pad (console controller) support
+
+The bridge supports all joystick and gamepad devices defined in HID Maestro.
+
+The bridge also adds a custom joystick device built on the Microsoft DINPUT specification which is extensively used by GEX.  This specification calls for normal joysticks to have up to 128 buttons, 8 axes and 4 hats.  This is the maximum, the actual devices can have fewer inputs, and most do, especially the emulated devices.
+
+Furthermore, the bridge is configured to output standard axis, button and hat data to joysticks or gamepads, to facilitiate the use of GEX's extensive joystick mapping capabilities without having to treat gamepads that use XINPUT as different devices.
+
+
+## Requirements and dependencies
+
+This is a source implementation, not a precompiled Windows release.  The precompiled release is included with GremlinEx's distribution and package.  The released package includes all dependencies.
+
+### Dependencies:
 
 - Windows x64 (or publish for Windows ARM64 with a matching complete HIDMaestro build).
 - .NET 10 SDK and a Visual Studio release supporting .NET 10 and Windows SDK 10.0.26100.0.
-- A complete **HIDMaestro 2.x `HIDMaestro.Core.dll`** with embedded native payloads, from the upstream release/build. Put it in `lib/`. No SDK binary or upstream code is redistributed here.
-- Administrator privileges for real controller creation; the installed service runs as LocalSystem.
+-  **HIDMaestro 2.x `HIDMaestro.Core.dll`** with embedded native payloads
+- Administrator privileges for real controller creation (non mock mode); the installed service runs as LocalSystem.  The requirement for elevated privileges stems from the usage as a service and is a core requirement of HIDMaestro due to the underlying Microsoft API user mode driver requirements.  Note that elevated rights are needed both for service mode, and console mode.
 - NuGet restore for Microsoft.Extensions.Hosting, WindowsServices and System.Management 10.0.0.
 
-The bridge uses `HMContext.LoadDefaultProfiles`, `AllProfiles`, `CreateController`, `HMProfileBuilder`, `HMGamepadState`, `StandardAxes`, `SubmitState`, `SubmitRawReport`, and controller/context disposal. Upstream master was inspected on October 30, 2026; no specific upstream commit was available to pin. Use a matching 2.x release and compile to confirm binary/API compatibility.
 
-## Open, build and run
 
-Open `MaestroOscService.sln` in Visual Studio Professional. Place the complete SDK DLL into `lib/`, restore packages and build. Start Visual Studio elevated when debugging real devices. There is no GUI; console logging appears while debugging, and the installed service logs to Windows Event Log.
+## Building instructions
 
-From PowerShell in this directory:
+Open `MaestroOscService.sln` in Visual Studio 2026 (Community edition is fine). Place the complete SDK DLL into `lib/` (download from [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro), restore packages and build. 
+
+Start Visual Studio with elevated permissions when debugging real devices as non-mock mode will load the HID Maestro engine. There is no user interface; console logging appears while debugging, and the installed service logs to Windows Event Log.
+
+Console mode is provided to see the traffic with OSC clients and responses.  The normal operating mode is to run this as a service that starts and stops with Windows.
+
+To build via PowerShell in this directory:
 
 ```powershell
 dotnet build .\MaestroOscService.sln -c Release
-dotnet run --project .\src\MaestroOscService -- --self-test
+dotnet run --project .\src\MaestroOscService -- --test
 dotnet run --project .\src\MaestroOscService
 ```
 
 To build/test the protocol without the HIDMaestro DLL:
 
 ```powershell
-dotnet run --project .\src\MaestroOscService -p:MockOnly=true -- --self-test
+dotnet run --project .\src\MaestroOscService -p:MockOnly=true -- --test
 dotnet run --project .\src\MaestroOscService -p:MockOnly=true -- --mock
 ```
 
@@ -44,6 +78,19 @@ $env:MAESTRO_Osc__DefinitionsPath = "$env:TEMP\MaestroOscService-devices.mock.js
 ```
 
 Use separate build output folders or clean the project when switching between MockOnly and real builds. A real build can also run `--mock`; a MockOnly build cannot run real controllers.
+
+## EXE Startup options
+
+Switch prefix can be `--`, `-`, or `/`.
+
+- `version` (`v`) - print version and exit
+- `help` (`h`) - print usage and exit
+- `test` - run built-in self-tests and exit
+- `install` - install Windows service
+- `uninstall` - stop (if running) and remove Windows service
+- `start` - start Windows service
+- `stop` - stop Windows service if running
+- `mock` - run in mock backend mode (no HID hardware creation)
 
 ## Transport
 
@@ -197,7 +244,7 @@ UDP is best effort: no reliable delivery or ordering guarantee. Writes are absol
 C# tests (no hardware):
 
 ```powershell
-dotnet run --project .\src\MaestroOscService -p:MockOnly=true -- --self-test
+dotnet run --project .\src\MaestroOscService -p:MockOnly=true -- --test
 ```
 
 In a second terminal while the service runs in mock mode:

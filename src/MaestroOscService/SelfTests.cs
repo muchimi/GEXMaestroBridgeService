@@ -61,9 +61,15 @@ public static class SelfTests
         var router = new CommandRouter(backend, 1, () => []);
         int id = 0;
         OscMessage Call(string address, params object?[] args) => router.Handle(new(address, new object?[] { ++id }.Concat(args).ToArray()), "client").Single();
-        OscMessage Control(string address, params object?[] args) => router.Handle(new(address, args), "client").Single();
+        IReadOnlyList<OscMessage> ControlReplies(string address, params object?[] args) => router.Handle(new(address, args), "client");
+        OscMessage Control(string address, params object?[] args) => ControlReplies(address, args).Single();
+        bool WriteNoReply(string address, params object?[] args) => ControlReplies(address, args).Count == 0;
         bool Value(string address, object expected, params object?[] args)
-        { var reply = Control(address, args); return reply.Address == address && Equals(reply.Arguments.Single(), expected); }
+        {
+            if (args.Length > 0 && !WriteNoReply(address, args)) return false;
+            var reply = Control(address);
+            return reply.Address == address && Equals(reply.Arguments.Single(), expected);
+        }
         Check(Call("/maestro_create", "pad", "mock-gamepad", "Named pad").Address == "/maestro_created", "named console create");
         Check(backend.Devices().Single().Name == "Named pad", "console name");
         Check(Call("/maestro_create", "pad", "mock-gamepad", "Named pad").Address == "/maestro_created", "idempotent create");
@@ -87,9 +93,11 @@ public static class SelfTests
             new OscMessage("/maestro_button/pad/1", float.NaN), new OscMessage("/maestro_axis/pad/X", 0.5f, 9)
         }) Check(router.Handle(message, "client").Single().Address == "/maestro_error", "reject invalid control " + message.Address);
         Check(Call("/other_axis", "pad", "X", 0f).Address == "/maestro_error", "prefix enforcement");
-        Check(Call("/maestro_reset").Address == "/maestro_error", "arity");
+        var arityError = Call("/maestro_reset");
+        Check(arityError.Address == "/maestro_error", "arity");
+        Check((int)arityError.Arguments[0] == id && Equals(arityError.Arguments[1], "/maestro_reset"), "management error includes request id and command name");
         var replay = new OscMessage("/maestro_reset", 10000, "pad");
-        var first = router.Handle(replay, "client"); Control("/maestro_button/pad/1", 1);
+        var first = router.Handle(replay, "client"); WriteNoReply("/maestro_button/pad/1", 1);
         Check(router.Handle(replay, "client").SequenceEqual(first) && backend.ReadButton("pad", 1) == 1, "management replay does not reapply reset");
         Check(router.Handle(new("/maestro_remove", 10000, "pad"), "client").Single().Arguments[2]?.ToString() == "request_id_conflict", "request collision");
         Check(Call("/maestro_rename", "pad", "Renamed pad").Address == "/maestro_renamed", "rename console");

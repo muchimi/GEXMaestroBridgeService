@@ -30,7 +30,11 @@ using System.Buffers.Binary;
 
 namespace GEXMaestroBridgeService;
 
-// Descriptor and report layout are defined together. No HMGamepadState/32-bit mask is used.
+
+/// <summary>
+/// DINPUT spec custom joystick as HIDMaestro currently treats joystics as having fewer DINPUC spec buttons and hats in particular.
+/// This lets GEX define normal joysticks (custom in HIDMaestro) that meets DINPUT spec devices of up to 128 buttons, 8 axes and 4 hats.
+/// </summary> 
 public sealed class CustomJoystick
 {
     public static readonly string[] AxisNames = ["X", "Y", "Z", "Rx", "Ry", "Rz", "Slider", "Dial"];

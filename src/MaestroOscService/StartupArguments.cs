@@ -33,13 +33,22 @@ using Microsoft.Extensions.Configuration;
 
 namespace GEXMaestroBridgeService;
 
+/// <summary>
+/// Handles startup arguments
+/// </summary>
+/// <param name="ReceivePort">the UDP receive port, can be nul and defaults to 8010</param>
+/// <param name="OutputPort">the UDP reply port, can be nul and defaults to receive port + 1</param>
+/// <param name="Mock">if set, places the app in simulation mode</param>
+/// <param name="HostArguments">arbitrary other start arguments</param>
 public sealed record StartupArguments(int? ReceivePort, int? OutputPort, bool Mock, string[] HostArguments)
 {
-    public const string Usage = "MaestroOscService.exe --version\n" +
-        "MaestroOscService.exe [receivePort [outputPort]] [--mock]\n" +
-        "MaestroOscService.exe [--port receivePort] [--output-port outputPort] [--mock]\n" +
-        "Defaults: receive 8010, output 8011. Receive only: output = receive + 1.\n" +
-        "Aliases: --receive-port, --send-port, --Osc:ReceivePort, --Osc:SendPort.\n" +
+    public const string Usage = "MaestroOscService.exe /version\n" +
+        "MaestroOscService.exe /install|/uninstall|/start|/stop|/test\n" +
+        "MaestroOscService.exe [receivePort [outputPort]] [/mock]\n" +
+        "MaestroOscService.exe [/port receivePort] [/output-port outputPort] [/mock]\n" +
+        "Switch prefix: /, - or /.\n" +
+        "Defaults: receive 8010, output 8011. If no output port is provided, the output port will be the receive port +1.\n" +
+        "Aliases: /receive-port, /send-port, /Osc:ReceivePort, /Osc:SendPort.\n" +
         "Ports must be different integers in 1..65535.";
 
     public static StartupArguments Parse(string[] args)
@@ -64,9 +73,10 @@ public sealed record StartupArguments(int? ReceivePort, int? OutputPort, bool Mo
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i];
-            if (arg.Equals("--mock", StringComparison.OrdinalIgnoreCase)) { mock = true; continue; }
             int equal = arg.IndexOf('=');
-            string key = (equal >= 0 ? arg[..equal] : arg).ToLowerInvariant();
+            string rawKey = equal >= 0 ? arg[..equal] : arg;
+            string key = NormalizeSwitch(rawKey);
+            if (key.Equals("--mock", StringComparison.OrdinalIgnoreCase)) { mock = true; continue; }
             bool isReceive = key is "--port" or "--receive-port" or "--udp-port" or "--osc:receiveport";
             bool isOutput = key is "--output-port" or "--send-port" or "--osc:sendport";
             if (isReceive || isOutput)
@@ -86,13 +96,13 @@ public sealed record StartupArguments(int? ReceivePort, int? OutputPort, bool Mo
                 }
                 continue;
             }
-            if (arg.StartsWith("--", StringComparison.Ordinal))
+            if (IsSwitch(rawKey))
             {
                 // Preserve ordinary Host configuration switches and their values.
                 host.Add(arg);
                 if (equal < 0)
                 {
-                    if (++i >= args.Length || args[i].StartsWith("--", StringComparison.Ordinal))
+                    if (++i >= args.Length || IsSwitch(args[i]))
                         throw new ArgumentException($"Missing value for {arg}");
                     host.Add(args[i]);
                 }
@@ -111,6 +121,17 @@ public sealed record StartupArguments(int? ReceivePort, int? OutputPort, bool Mo
         if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out int value) || value is < 1 or > 65535)
             throw new ArgumentException($"{name} must be an integer in 1..65535");
         return value;
+    }
+
+    private static bool IsSwitch(string value) => value.StartsWith("--", StringComparison.Ordinal) ||
+        value.StartsWith("-", StringComparison.Ordinal) || value.StartsWith("/", StringComparison.Ordinal);
+
+    private static string NormalizeSwitch(string value)
+    {
+        string key = value;
+        if (key.StartsWith("--", StringComparison.Ordinal)) key = key[2..];
+        else if (key.StartsWith("-", StringComparison.Ordinal) || key.StartsWith("/", StringComparison.Ordinal)) key = key[1..];
+        return "--" + key.ToLowerInvariant();
     }
 }
 

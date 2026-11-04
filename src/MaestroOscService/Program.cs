@@ -31,24 +31,93 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Diagnostics;
+using System.ServiceProcess;
 using System.Security.Authentication.ExtendedProtection;
 using System.Security.Principal;
 
 const string ServiceName = "GEXMaestroBridgeService";
 
+static bool HasSwitch(string[] argv, string name, string? shortName = null) => argv.Any(a =>
+{
+    if (a.Length == 0) return false;
+    string token = a;
+    if (token.StartsWith("--", StringComparison.Ordinal)) token = token[2..];
+    else if (token.StartsWith("-", StringComparison.Ordinal) || token.StartsWith("/", StringComparison.Ordinal)) token = token[1..];
+    if (token.Equals(name, StringComparison.OrdinalIgnoreCase)) return true;
+    return shortName is not null && token.Equals(shortName, StringComparison.OrdinalIgnoreCase);
+});
 
 
-if (args.Any(a => a.Equals("--version", StringComparison.OrdinalIgnoreCase) || a.Equals("-v", StringComparison.OrdinalIgnoreCase)))
+
+if (HasSwitch(args, "version", "v"))
 {
     Console.WriteLine(typeof(OscWorker).Assembly.GetName().Version?.ToString(3) ?? "unknown");
     return;
 }
-if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
+if (HasSwitch(args, "install"))
+{
+    try
+    {
+        string exePath = Environment.ProcessPath ?? throw new InvalidOperationException("Could not resolve executable path");
+        RunSc($"create {ServiceName} start= auto DisplayName= \"{ServiceName}\" binPath= \"\"{exePath}\"\"");
+        Console.WriteLine($"Service '{ServiceName}' installed.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+if (HasSwitch(args, "uninstall"))
+{
+    try
+    {
+        TryStopService(ServiceName);
+        RunSc($"delete {ServiceName}");
+        Console.WriteLine($"Service '{ServiceName}' removed.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+if (HasSwitch(args, "start"))
+{
+    try
+    {
+        RunSc($"start {ServiceName}");
+        Console.WriteLine($"Service '{ServiceName}' start requested.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+if (HasSwitch(args, "stop"))
+{
+    try
+    {
+        if (TryStopService(ServiceName)) Console.WriteLine($"Service '{ServiceName}' stopped.");
+        else Console.WriteLine($"Service '{ServiceName}' is not running.");
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        Environment.ExitCode = 1;
+    }
+    return;
+}
+if (HasSwitch(args, "test"))
 {
     SelfTests.Run();
     return;
 }
-if (args.Any(a => a.Equals("--help", StringComparison.OrdinalIgnoreCase) || a == "-h"))
+if (HasSwitch(args, "help", "h"))
 {
     Console.WriteLine(StartupArguments.Usage);
     return;
@@ -100,3 +169,37 @@ builder.Services.AddSingleton<IMaestroBackend>(_ =>
 });
 builder.Services.AddHostedService<OscWorker>();
 await builder.Build().RunAsync();
+
+static void RunSc(string arguments)
+{
+    var start = new ProcessStartInfo("sc.exe", arguments)
+    {
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+    using var process = Process.Start(start) ?? throw new InvalidOperationException("Failed to start sc.exe");
+    string stdout = process.StandardOutput.ReadToEnd();
+    string stderr = process.StandardError.ReadToEnd();
+    process.WaitForExit();
+    if (!string.IsNullOrWhiteSpace(stdout)) Console.WriteLine(stdout.TrimEnd());
+    if (process.ExitCode != 0)
+        throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? $"sc.exe failed with exit code {process.ExitCode}." : stderr.Trim());
+}
+
+static bool TryStopService(string serviceName)
+{
+    using var controller = new ServiceController(serviceName);
+    try { _ = controller.Status; }
+    catch (InvalidOperationException) { return false; }
+    if (controller.Status == ServiceControllerStatus.Stopped) return false;
+    if (controller.Status == ServiceControllerStatus.StopPending)
+    {
+        controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
+        return true;
+    }
+    controller.Stop();
+    controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
+    return true;
+}

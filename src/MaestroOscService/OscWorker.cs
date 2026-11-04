@@ -92,6 +92,17 @@ public sealed class OscWorker(IMaestroBackend backend, OscOptions options, ILogg
         var catalog = new DefinitionCatalog(backend, options.MaxDevices, definitionsPath);
         catalog.Restore();
         var router = new CommandRouter(backend, options.MaxDevices, SystemDevices.Enumerate, catalog);
+        var stopRecipients = new HashSet<string>(StringComparer.Ordinal);
+        var startRecipients = new HashSet<string>(StringComparer.Ordinal);
+        if (options.ReplyAddress.Length > 0)
+        {
+            string endpoint = new IPEndPoint(IPAddress.Parse(options.ReplyAddress), options.SendPort).ToString();
+            stopRecipients.Add(endpoint);
+            startRecipients.Add(endpoint);
+            // notify on startup that the bridge is running, so the client can start sending commands (if the client is already listening)
+            // happens on service start or console start after port is open
+            await Reply(new OscMessage("/maestro_start"), new IPEndPoint(IPAddress.Parse(options.ReplyAddress), options.SendPort), sender, stoppingToken);
+        }
         logger.LogInformation("GEX Maestro Bridge listening at {Address}:{Port}; reply destination port {ReplyPort}; mock={Mock}",
             options.ListenAddress, options.ReceivePort, options.SendPort, options.Mock);
         try
@@ -100,14 +111,18 @@ public sealed class OscWorker(IMaestroBackend backend, OscOptions options, ILogg
             {
                 var datagram = await receiver.ReceiveAsync(stoppingToken);
                 if (allowed != null && !allowed.Contains(datagram.RemoteEndPoint.Address)) continue;
-               
+               // send the start message to recipients when the service starts or when the console app starts, after the port is setup
                 var destination = new IPEndPoint(options.ReplyAddress.Length == 0 ? datagram.RemoteEndPoint.Address
                     : IPAddress.Parse(options.ReplyAddress), options.SendPort);
+                string destinationKey = destination.ToString();
+                stopRecipients.Add(destinationKey);
+                if (startRecipients.Add(destinationKey))
+                    await Reply(new OscMessage("/maestro_start"), destination, sender, stoppingToken);
                 IReadOnlyList<OscMessage> commands;
                 try { commands = OscCodec.Decode(datagram.Buffer); }
                 catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
                 {
-                    await Reply(CommandRouter.Error(-1, "", "bad_packet", ex.Message), destination, sender, stoppingToken);
+                    await Reply(CommandRouter.Error(-1, "/maestro_packet", "bad_packet", ex.Message), destination, sender, stoppingToken);
                     continue;
                 }
                 // Decode the entire packet before dispatching. Malformed bundles have no side effects.
@@ -123,6 +138,13 @@ public sealed class OscWorker(IMaestroBackend backend, OscOptions options, ILogg
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         finally
         {
+            foreach (string endpoint in stopRecipients)
+            {
+                // notify reciepients the bridge is stopping, so they can stop sending commands (if the client is already listening)
+                // this happens on service stop or when the console app exits
+                if (!IPEndPoint.TryParse(endpoint, out var destination) || destination is null) continue;
+                await Reply(new OscMessage("/maestro_stop"), destination, sender, CancellationToken.None);
+            }
             // Host DI disposes the backend after the worker stops, removing owned controllers.
             logger.LogInformation("GEX Maestro Bridge listener stopped");
         }
