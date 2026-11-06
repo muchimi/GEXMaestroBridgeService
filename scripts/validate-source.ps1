@@ -1,6 +1,6 @@
 param([switch]$IncludeRealBuild)
 $ErrorActionPreference = 'Stop'
-$project = Join-Path $PSScriptRoot '..\src\MaestroOscService\MaestroOscService.csproj'
+$project = Join-Path $PSScriptRoot '..\src\MaestroOscService\GEXMaestroBridgeService.csproj'
 & dotnet run --project $project -p:MockOnly=true -- --self-test
 if ($LASTEXITCODE -ne 0) { throw 'C# mock self-tests or compilation failed.' }
 & python -m unittest discover -s (Join-Path $PSScriptRoot '..\tests') -p 'test_*.py' -v

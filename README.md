@@ -1,21 +1,37 @@
 # GEX Maestro Bridge Service
 
-A standalone C# Windows Worker Service bridging [GremlinEx (GEX)](https://github.com/muchimi/JoystickGremlinEx) to [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro). 
+A standalone C# Windows Worker Service bridging [GremlinEx (GEX)](https://github.com/muchimi/JoystickGremlinEx) to [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro).
 
 
 The module provides an interface to HID Maestro's API to manage joystick and gamepad devices and to read/write to/from them.
 
-The interface is based on the standard OSC (Open Sound Control) protocol, for two reasons.  First, OSC support is built-in GremlinEx and lets it easily connect to this bridge to manage virtual HID Maestro devices with existing APIs.  Second, it is lightweight and fast and supports multiple parameter types and handshake information for two way communication.   While this interface is created specifically to bridge GremlinEx Python/C++ platform to HIDMaestro's C#/.NET platform, because it is an implementation of the OSC protocol it can be used with any OSC compatible software for the purpose of sending buttons, hats and axis data to HIDMaestro.  
+The interface is based on the standard OSC (Open Sound Control) protocol, for two reasons.  First, OSC support is built-in GremlinEx and lets it easily connect to this bridge to manage virtual HID Maestro devices with existing APIs.  Second, it is lightweight and fast and supports multiple parameter types and handshake information for two way communication.   While this interface is created specifically to bridge GremlinEx Python/C++ platform to HIDMaestro's C#/.NET platform, because it is an implementation of the OSC protocol it can be used with any OSC compatible software for the purpose of sending buttons, hats and axis data to HIDMaestro.
 
 ## Implementation Overview
 
 The module is designed to run as a Windows service, and for diagnostics purposes, can also run as a console application.
 
-Because HID Maestro requires elevated privileges, so does this module. 
+Because HID Maestro requires elevated privileges, so does this module.
 
-The service can be installed on the same machine as GremlinEx, or a different machine.  
+The service can be installed on the same machine as GremlinEx, or a different machine.
 
 No separate installation of HIDMaestro is required as the bridge module encapsulates that functionality.
+
+## GEX Integration
+
+The bridge module should function with any application, however it is specifically setup to work with [GremlinEx (GEX)](https://github.com/muchimi/JoystickGremlinEx) as a replacement option to VJOY and VIGEM.
+
+GEX manages the Maestro joystick and gamepad creation to ensure compatibility with GEX and automatic device mapping from older VJOY to the new Maestro equivalents created by GEX.
+
+## Capabilities
+
+The focus of the bridge module is only to work with joystick and gamepads.  It is not designed to work with other devices supported by HID Maestro as the focus is only for the mapping of joystick and gamepad devices.
+
+There is no limit imposed by HID Maestro on the number of joysticks, no more than 16 is recommended, and a practical count of 4 is recommended and will be setup by GEX as a base configuration, matching the maximum DINPUT specification of 128 buttons, 8 axes and 4 hats, x4 devices.
+
+There is a hard limit on gamepad devices as the XINPUT standard limits this to four (4) devices (player 1 through 4).
+
+
 
 ## OSC configuration
 
@@ -50,7 +66,7 @@ This is a source implementation, not a precompiled Windows release.  The precomp
 
 ## Building instructions
 
-Open `MaestroOscService.sln` in Visual Studio 2026 (Community edition is fine). Place the complete SDK DLL into `lib/` (download from [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro), restore packages and build. 
+Open `MaestroOscService.sln` in Visual Studio 2026 (Community edition is fine). Place the complete SDK DLL into `lib/` (download from [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro), restore packages and build.
 
 Start Visual Studio with elevated permissions when debugging real devices as non-mock mode will load the HID Maestro engine. There is no user interface; console logging appears while debugging, and the installed service logs to Windows Event Log.
 
@@ -275,6 +291,8 @@ python .\tests\verify_dinput.py --name "Flight Controls" --buttons 128 --axes 8 
 This DirectInput check queries Windows capabilities; it is distinct from reading bridge configuration. Test button 128, Dial endpoints and all four hats independently in a DirectInput viewer/target game. Also create an Xbox/PlayStation profile and test named buttons, both sticks and both triggers. Confirm rename, deactivate/reactivate, deletion, service stop and restart behavior. joy.cpl may display fewer controls than the device descriptor offers; the DirectInput verifier checks the API counts directly.
 
 ## Publish and install
+
+Release builds can optionally create `GEXMaestroBridgeSetup-<version>-x64.exe` with `dotnet build -c Release -p:BuildInstaller=true`. Use `-p:PublishGitHubRelease=true` to also publish the setup to GitHub under a tag matching the project's `Version` (for example, `0.1.0`). See [installer build and release options](installer/README.md) for requirements, authentication, and output locations.
 
 From the project root, publish an x64 self-contained folder:
 

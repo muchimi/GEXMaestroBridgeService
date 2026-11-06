@@ -9,7 +9,7 @@ param(
  [ValidateSet('true','false')][string]$CreateDevices='false'
 )
 $ErrorActionPreference='Stop'
-$exe=Join-Path $InstallDir 'MaestroOscService.exe'
+$exe=Join-Path $InstallDir 'GEXMaestroBridgeService.exe'
 if (!(Test-Path $exe)) { throw "Missing executable: $exe" }
 if ($Remote -eq 'true') {
  $ip=$null
@@ -27,15 +27,24 @@ foreach($entry in @{ListenAddress=$listen;ReceivePort=$ListenPort;SendPort=$Send
 }
 if(Test-Path $cfg) { Copy-Item $cfg "$cfg.backup" -Force }
 $settings | ConvertTo-Json -Depth 20 | Set-Content $cfg -Encoding UTF8
-$service='GEXMaestroBridge'
+$service='GEXMaestroBridgeService'
 $existing=Get-Service $service -ErrorAction SilentlyContinue
 if($existing) {
  if($existing.Status -ne 'Stopped') { Stop-Service $service -Force }
- if($Mode -eq 'console') { & sc.exe delete $service | Out-Null }
+ if($Mode -eq 'console') {
+  & sc.exe delete $service | Out-Null
+  if($LASTEXITCODE -ne 0) { throw 'Could not remove the existing bridge service.' }
+ }
 }
 if($Mode -eq 'service') {
- if(-not $existing) { & sc.exe create $service "binPath= `"$exe`"" 'start= auto' 'obj= LocalSystem' | Out-Null }
- else { & sc.exe config $service "binPath= `"$exe`"" 'start= auto' | Out-Null }
+ $binary='"'+$exe+'"'
+ if(-not $existing) {
+  New-Service -Name $service -DisplayName 'GEX Maestro Bridge Service' -BinaryPathName $binary -StartupType Automatic | Out-Null
+ } else {
+  $serviceConfig=Get-CimInstance Win32_Service -Filter "Name='$service'"
+  $result=Invoke-CimMethod -InputObject $serviceConfig -MethodName Change -Arguments @{PathName=$binary;StartMode='Automatic'}
+  if($result.ReturnValue -ne 0) { throw "Could not configure the bridge service: $($result.ReturnValue)" }
+ }
 }
 Get-NetFirewallRule -Name 'GEXMaestroBridge-OSC' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 if($FirewallScope -ne 'none') {

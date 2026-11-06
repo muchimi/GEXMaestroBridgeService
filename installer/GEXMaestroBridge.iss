@@ -2,13 +2,17 @@
 #ifndef AppVersion
 #define AppVersion "0.1.0"
 #endif
+#ifndef PayloadDir
+#define PayloadDir AddBackslash(SourcePath) + "..\payload"
+#endif
 [Setup]
 AppId={{D26DA10A-73A7-482A-A711-6B7E04C8D8A0}
 AppName={#AppName}
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}.0
 DefaultDirName={autopf}\GEXMaestroBridge
 DefaultGroupName=GEX Maestro Bridge
-OutputDir=..\dist
+OutputDir=..\artifacts\installer
 OutputBaseFilename=GEXMaestroBridgeSetup-{#AppVersion}-x64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -21,8 +25,8 @@ DisableProgramGroupPage=yes
 CloseApplications=yes
 RestartApplications=no
 [Files]
-Source: "..\dist\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "..\dist\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
+Source: "{#PayloadDir}\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#PayloadDir}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "configure.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; Flags: dontcopy
@@ -186,7 +190,7 @@ var R: Integer;
 begin
   if CurUninstallStep = usUninstall then begin
     Exec('sc.exe', 'stop GEXMaestroBridgeService', '', SW_HIDE, ewWaitUntilTerminated, R);
-    Exec('sc.exe', 'delete GEXMaestroBridge', '', SW_HIDE, ewWaitUntilTerminated, R);
+    Exec('sc.exe', 'delete GEXMaestroBridgeService', '', SW_HIDE, ewWaitUntilTerminated, R);
     Exec('powershell.exe', '-NoProfile -Command "Get-NetFirewallRule -Name ''GEXMaestroBridge-OSC'' -ErrorAction SilentlyContinue | Remove-NetFirewallRule"', '', SW_HIDE, ewWaitUntilTerminated, R);
   end;
 end;

@@ -1,31 +1,62 @@
-# GEX Maestro Bridge installer (development)
+# GEX Maestro Bridge installer
 
-Inno Setup 6 source for an offline Windows x64 installer. This is an **unvalidated prototype**, not a tested release.
+The Release build can optionally create a Windows x64 setup program and publish it to `muchimi/GEXMaestroBridgeService`. Both options are off by default.
 
-## Build
+## Build options
 
-On Windows with .NET 10 SDK, Inno Setup 6 and PowerShell:
+From the repository root:
 
 ```powershell
-.\installer\build-installer.ps1 -BridgeProject .\src\MaestroOscService\MaestroOscService.csproj -Version 0.1.0 -HidZipSha256 '<independently verified SHA-256>'
+# Build the bridge only.
+dotnet build -c Release
+
+# Build the bridge and its setup program.
+dotnet build -c Release -p:BuildInstaller=true
+
+# Build the setup program and publish a GitHub release.
+dotnet build -c Release -p:PublishGitHubRelease=true
 ```
 
-Build downloads HIDMaestro v2.1.0, verifies the ZIP hash, publishes a self-contained .NET application, then packages it. Check third-party license files before redistribution.
+Use Windows, .NET 10 SDK, Inno Setup 6 or 7, and the complete official HIDMaestro 2.x `lib\HIDMaestro.Core.dll` containing its native driver payloads. Set `ISCC_EXE` or `-p:InnoSetupCompiler="C:\path\ISCC.exe"` if the compiler is not on PATH or in a standard installation directory. `-p:HidMaestroDll="C:\path\HIDMaestro.Core.dll"` overrides the SDK location. Debug and mock builds cannot be packaged.
 
-## Current behavior and limitations
+Ordinary build copies go to `artifacts\build\<configuration>\<platform>`. Packaging performs a separate self-contained `win-x64` publish into a fresh directory under `artifacts\installer-payload`, stages the license files, verifies the bridge's `--version`, and produces:
 
-- Installer prompts for service or console mode, OSC ports, local or remote GremlinEx, and firewall scope.
-- Setup requests administrator privileges. HIDMaestro driver operations and service installation require elevation.
-- Service runs as LocalSystem. Console mode does not register a service.
-- Localhost mode binds to 127.0.0.1; remote mode listens on 0.0.0.0 and can create an inbound firewall rule.
-- **Default GEX 1-4 device creation is NOT implemented** despite the UI checkbox. Do not advertise it as working.
-- **Upgrade/rollback logic is NOT complete**. Existing service files may be locked while upgrading.
-- Installer and build have NOT been compiled or tested on Windows.
-- Verify executable name, dependency layout, driver behavior, appsettings merging and service lifecycle before release.
-- A GitHub Actions release workflow has not yet been added.
+```text
+artifacts\installer\GEXMaestroBridgeSetup-0.1.0-x64.exe
+```
 
-Do not publish this as production-ready until these limitations are resolved and Windows testing passes.
+Installer output is separate from its payload, so a previous installer cannot enter the next package. Nested publish disables the packaging/publishing targets to prevent recursion. No build step clears the existing `dist` directory.
 
-## License packaging
+The setup can also be built directly:
 
-The build script validates and copies all four files from the repository's `licenses/` directory into `payload/licenses/`. The Inno Setup `[Files]` recursive payload entry installs them under `{app}\\licenses`. The wizard also displays the bridge GPL-3.0 license. HIDMaestro's MIT license and third-party notices remain available in the installed licenses folder. Do not delete these files from distribution packages.
+```powershell
+.\installer\build-installer.ps1
+.\installer\build-installer.ps1 -PublishRelease
+```
+
+## Versioned GitHub releases
+
+`Version` in `src\MaestroOscService\GEXMaestroBridgeService.csproj` is the source of the assembly version, reported application version, installer version/name, and release tag. It must be `major.minor.patch`. A build with version `0.1.0` publishes tag **`0.1.0`** and asset **`GEXMaestroBridgeSetup-0.1.0-x64.exe`**, matching GremlinEx's optional dependency downloader. You can override the version consistently with `-p:Version=0.1.1`.
+
+Publishing authenticates through `GH_TOKEN`, `GITHUB_TOKEN`, or Git Credential Manager. The credential needs Contents read/write access to `muchimi/GEXMaestroBridgeService`. Commit and push the release source first: the release/tag targets the local HEAD commit, which must exist on GitHub. The build does not commit or push source changes.
+
+The publisher creates a draft, uploads and checks the setup asset, then publishes a stable release. GitHub chooses Latest using creation date and semantic version (`make_latest=legacy`), allowing GremlinEx's `/releases/latest` lookup to find it. Upload failure leaves a newly created release as a draft. An identical uploaded asset can be reused; a different setup for the same version is rejected instead of replacing released binaries. Increment `Version` when releasing changed binaries.
+
+To publish an already built setup:
+
+```powershell
+.\installer\publish-release.ps1 -Version 0.1.0 -Installer .\artifacts\installer\GEXMaestroBridgeSetup-0.1.0-x64.exe
+```
+
+## Installation and validation
+
+Setup offers service/console mode, OSC ports, local/remote GremlinEx, and firewall scope. Service mode runs as LocalSystem; driver and service operations require elevation. Existing `appsettings.json` is preserved. Default GEX 1-4 device creation remains unimplemented. Windows service, driver, controller and upgrade behavior still require manual validation before release; compilation alone does not validate those operations.
+
+All files from `licenses\GPL-3.0.txt`, `HIDMaestro-MIT.txt`, `THIRD-PARTY-NOTICES.txt`, and `README.md` are included under the installed `licenses` folder. The bridge GPL license is also displayed by setup.
+
+Run the mocked release workflow checks without network access or GitHub writes:
+
+```powershell
+.\installer\test-release.ps1
+.\installer\test-configure.ps1
+```
