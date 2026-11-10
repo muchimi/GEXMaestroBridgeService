@@ -1,6 +1,6 @@
 #define AppName "GEX Maestro Bridge"
 #ifndef AppVersion
-#define AppVersion "0.1.0"
+#define AppVersion "0.1.1"
 #endif
 #ifndef PayloadDir
 #define PayloadDir AddBackslash(SourcePath) + "..\payload"
@@ -10,7 +10,7 @@ AppId={{D26DA10A-73A7-482A-A711-6B7E04C8D8A0}
 AppName={#AppName}
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}.0
-DefaultDirName={autopf}\GEXMaestroBridge
+DefaultDirName=C:\GremlinEx\GEXMaestroBridge
 DefaultGroupName=GEX Maestro Bridge
 OutputDir=..\artifacts\installer
 OutputBaseFilename=GEXMaestroBridgeSetup-{#AppVersion}-x64
@@ -28,7 +28,9 @@ RestartApplications=no
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Excludes: "appsettings.json"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "{#PayloadDir}\appsettings.json"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "configure.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "configure.cmd"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "upgrade.cmd"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "upgrade.ps1"; Flags: dontcopy
 [Icons]
 Name: "{autoprograms}\GEX Maestro Bridge Console"; Filename: "{app}\GEXMaestroBridgeService.exe"; Check: IsConsole
@@ -37,7 +39,7 @@ Name: "{autoprograms}\Uninstall GEX Maestro Bridge"; Filename: "{uninstallexe}"
 var
   NetworkPage, WarningPage: TWizardPage;
   ListenPort, SendPort, HostIP: TNewEdit;
-  RemoteBox, ServiceBox, DevicesBox, FirewallBox, AnyBox: TNewCheckBox;
+  RemoteBox, ServiceBox, FirewallBox, AnyBox: TNewCheckBox;
   WarningText: TNewStaticText;
   UpgradePending: Boolean;
   UpgradePrepared: Boolean;
@@ -59,6 +61,8 @@ begin
   Result := (N >= 1) and (N <= 65535);
 end;
 
+function TargetExePath: String; forward;
+
 procedure InitializeWizard;
 begin
   WarningPage := CreateCustomPage(wpWelcome, 'Administrator access and security', 'Review privileged operations before proceeding');
@@ -74,38 +78,32 @@ begin
   ServiceBox.SetBounds(0, 0, 380, 22);
   ServiceBox.Caption := 'Install as Windows Service (otherwise console)';
   ExistingService := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\GEXMaestroBridgeService');
-  ServiceBox.Checked := ExistingService or not FileExists(ExpandConstant('{autopf}\GEXMaestroBridge\GEXMaestroBridgeService.exe'));
-  ServiceBox.Enabled := not FileExists(ExpandConstant('{autopf}\GEXMaestroBridge\GEXMaestroBridgeService.exe'));
-  DevicesBox := TNewCheckBox.Create(NetworkPage);
-  DevicesBox.Parent := NetworkPage.Surface;
-  DevicesBox.SetBounds(0, 26, 380, 22);
-  DevicesBox.Caption := 'Request default GEX 1-4 devices (not yet implemented)';
-  DevicesBox.Checked := False;
-  DevicesBox.Enabled := ServiceBox.Enabled;
+  ServiceBox.Checked := ExistingService or not FileExists(TargetExePath());
+  ServiceBox.Enabled := not FileExists(TargetExePath());
   RemoteBox := TNewCheckBox.Create(NetworkPage);
   RemoteBox.Parent := NetworkPage.Surface;
-  RemoteBox.SetBounds(0, 52, 380, 22);
+  RemoteBox.SetBounds(0, 26, 380, 22);
   RemoteBox.Caption := 'GremlinEx runs on another computer';
   ListenPort := TNewEdit.Create(NetworkPage);
   ListenPort.Parent := NetworkPage.Surface;
-  ListenPort.SetBounds(0, 86, 90, 23);
+  ListenPort.SetBounds(0, 60, 90, 23);
   ListenPort.Text := '8010';
   SendPort := TNewEdit.Create(NetworkPage);
   SendPort.Parent := NetworkPage.Surface;
-  SendPort.SetBounds(110, 86, 90, 23);
+  SendPort.SetBounds(110, 60, 90, 23);
   SendPort.Text := '8011';
   HostIP := TNewEdit.Create(NetworkPage);
   HostIP.Parent := NetworkPage.Surface;
-  HostIP.SetBounds(0, 118, 260, 23);
+  HostIP.SetBounds(0, 92, 260, 23);
   HostIP.Text := '127.0.0.1';
   FirewallBox := TNewCheckBox.Create(NetworkPage);
   FirewallBox.Parent := NetworkPage.Surface;
-  FirewallBox.SetBounds(0, 151, 380, 22);
+  FirewallBox.SetBounds(0, 125, 380, 22);
   FirewallBox.Caption := 'Create inbound UDP firewall rule (remote only)';
   FirewallBox.Checked := True;
   AnyBox := TNewCheckBox.Create(NetworkPage);
   AnyBox.Parent := NetworkPage.Surface;
-  AnyBox.SetBounds(0, 178, 380, 22);
+  AnyBox.SetBounds(0, 152, 380, 22);
   AnyBox.Caption := 'Allow ANY remote IP (less secure)';
 end;
 
@@ -129,6 +127,11 @@ begin
   Result := '"' + S + '"';
 end;
 
+function TargetExePath: String;
+begin
+  Result := AddBackslash(WizardDirValue) + 'GEXMaestroBridgeService.exe';
+end;
+
 function RunUpgrade(Action: String): Boolean;
 var Params: String; ResultCode: Integer;
 begin
@@ -144,7 +147,7 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
-var Params, Mode, Remote, Scope, MakeDevices: String; ResultCode: Integer;
+var Params, Mode, Remote, Scope: String; ResultCode: Integer;
 begin
   if CurStep = ssInstall then begin
     ExtractTemporaryFile('upgrade.ps1');
@@ -167,14 +170,13 @@ begin
     end;
     if ServiceBox.Checked then Mode := 'service' else Mode := 'console';
     if RemoteBox.Checked then Remote := 'true' else Remote := 'false';
-    if DevicesBox.Checked then MakeDevices := 'true' else MakeDevices := 'false';
     if not RemoteBox.Checked or not FirewallBox.Checked then Scope := 'none'
     else if AnyBox.Checked then Scope := 'any' else Scope := 'host';
     Params := '-NoProfile -ExecutionPolicy Bypass -File ' + PsQuote(ExpandConstant('{app}\installer\configure.ps1')) +
       ' -InstallDir ' + PsQuote(ExpandConstant('{app}')) + ' -Mode ' + Mode +
       ' -ListenPort ' + ListenPort.Text + ' -SendPort ' + SendPort.Text +
       ' -Remote ' + Remote + ' -GremlinHost ' + PsQuote(HostIP.Text) +
-      ' -FirewallScope ' + Scope + ' -CreateDevices ' + MakeDevices;
+      ' -FirewallScope ' + Scope;
     if not Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       RaiseException('Bridge configuration failed. Exit code: ' + IntToStr(ResultCode));
   end;

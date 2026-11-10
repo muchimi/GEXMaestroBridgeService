@@ -42,14 +42,50 @@ namespace GEXMaestroBridgeService;
 /// <param name="HostArguments">arbitrary other start arguments</param>
 public sealed record StartupArguments(int? ReceivePort, int? OutputPort, bool Mock, string[] HostArguments)
 {
-    public const string Usage = "MaestroOscService.exe /version\n" +
-        "MaestroOscService.exe /install|/uninstall|/start|/stop|/test\n" +
-        "MaestroOscService.exe [receivePort [outputPort]] [/mock]\n" +
-        "MaestroOscService.exe [/port receivePort] [/output-port outputPort] [/mock]\n" +
-        "Switch prefix: /, - or /.\n" +
-        "Defaults: receive 8010, output 8011. If no output port is provided, the output port will be the receive port +1.\n" +
-        "Aliases: /receive-port, /send-port, /Osc:ReceivePort, /Osc:SendPort.\n" +
-        "Ports must be different integers in 1..65535.";
+    public const string Usage = """
+        GEXMaestroBridgeService.exe [receivePort [outputPort]] [--mock]
+        GEXMaestroBridgeService.exe [--port receivePort] [--output-port outputPort] [--mock]
+        GEXMaestroBridgeService.exe [runtime options] [--Osc:Setting value ...]
+
+        Actions (print a result and exit; use one per invocation):
+          --help, -h         Print this usage text.
+          --version, -v      Print the application version.
+          --test             Run built-in self-tests without creating HID hardware.
+          --install          Register an automatic Windows service; does not start it.
+          --uninstall        Stop and unregister the Windows service.
+          --start            Start the registered Windows service.
+          --stop             Stop the registered Windows service if running.
+
+        Runtime options:
+          --port <number>         Receive UDP port (default 8010).
+            Aliases: --receive-port, --udp-port, --Osc:ReceivePort.
+          --output-port <number>  Reply destination UDP port (default 8011).
+            Aliases: --send-port, --Osc:SendPort.
+          --mock                  Use the mock backend without creating HID hardware.
+
+        Configuration overrides:
+          --Osc:ListenAddress <IPv4>          Bind address; blank config uses a host IPv4.
+          --Osc:ReplyAddress <IPv4>           Fixed reply IP; blank config uses sender IP.
+          --Osc:AllowedSenders:<index> <IPv4> Allowed sender, indexed from 0.
+          --Osc:DefinitionsPath <path>        Saved device definitions file.
+          --Osc:MaxDevices <number>           Device limit, 1..256 (default 16).
+          --Osc:ReceiveBufferBytes <number>   Buffer, 65536..16777216 (default 1048576).
+          --Osc:InstallDriverOnStart <bool>   Request driver installation (default true).
+          --Osc:Mock <bool>                   Select mock backend (default false).
+          --Logging:LogLevel:Default <level>  Default application log level.
+          --Logging:LogLevel:Microsoft.Hosting.Lifetime <level>
+          --Logging:EventLog:LogLevel:Default <level>
+        Other configuration keys accept --Section:Setting value or =value.
+        Boolean configuration values must be true or false; --mock takes no value.
+
+        Built-in switch prefixes: --, - or / (case-insensitive).
+        Named port/configuration values accept a space or = before the value.
+        Ports must be different integers in 1..65535. A receive-only override selects
+        receive port + 1 for replies; receive port 65535 needs an explicit output port.
+        No arguments explicitly selects ports 8010/8011, overriding configured ports.
+        --install and --start do not save or forward runtime arguments to the service.
+        See COMMAND-LINE.md for service IP/port configuration and examples in both shells.
+        """;
 
     public static StartupArguments Parse(string[] args)
     {

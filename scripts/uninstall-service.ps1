@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 $ErrorActionPreference = 'Stop'
-$serviceName = 'MaestroOscService'
+$serviceName = 'GEXMaestroBridgeService'
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if ($service) {
     if ($service.Status -ne 'Stopped') { Stop-Service -Name $serviceName; $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(180)) }

@@ -97,6 +97,8 @@ Use separate build output folders or clean the project when switching between Mo
 
 ## EXE Startup options
 
+See the [command-line guide](COMMAND-LINE.md) for the full option reference, UDP port rules, local and remote examples, service management, and mock-mode commands.
+
 Switch prefix can be `--`, `-`, or `/`.
 
 - `version` (`v`) - print version and exit
@@ -132,6 +134,79 @@ Switch prefix can be `--`, `-`, or `/`.
 Replies go to the sender's IP at destination UDP port 8011, irrespective of the request's source port. The reply socket has an ephemeral source port. A nonempty ReplyAddress overrides the destination IP for all clients. The other application must bind its reply listener to port 8011. Only one application should own that port per local IP.
 
 By default, an empty ListenAddress resolves to the host's primary IPv4 address at startup. For LAN access from specific clients, explicitly add each client's IP to AllowedSenders and allow inbound UDP 8010 for the service executable in Windows Firewall. Configure the client firewall to receive replies on 8011. These are IPv4 literals. This is a local/trusted-LAN control interface, without authentication or encryption.
+
+**IMPORTANT** Changes to the configuration requires a service restart for the new settings to take place.
+
+### Example of the JSON for a local configuration (bridge runs on the same machine as GEX)
+
+```json
+{
+  "Osc": {
+    "ListenAddress": "127.0.0.1",
+    "ReceivePort": 8010,
+    "SendPort": 8011,
+    "ReplyAddress": "127.0.0.1",
+    "AllowedSenders": ["127.0.0.1"],
+    "ReceiveBufferBytes": 1048576,
+    "MaxDevices": 16,
+    "InstallDriverOnStart": true,
+    "Mock": false,
+    "DefinitionsPath": ""
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.Hosting.Lifetime": "Information"
+    },
+    "EventLog": {
+      "LogLevel": {
+        "Default": "Information"
+      }
+    }
+  }
+}
+```
+
+In this scenario, GEX is configured to also use localhost, and sends on port 8010, and receives on port 8011.
+The bridge sends on 8011 and receives on 8010.
+
+When using localhost (127.0.0.1), no Windows Firewall rules need to be set.
+
+### Example of the JSON for a networked configuration (bridge runs on a different machine from GEX) - advanced setup
+
+
+```json
+{
+  "Osc": {
+    "ListenAddress": "192.168.2.210",
+    "ReceivePort": 8010,
+    "SendPort": 8011,
+    "ReplyAddress": "192.168.2.205",
+    "AllowedSenders": ["192.168.2.205"],
+    "ReceiveBufferBytes": 1048576,
+    "MaxDevices": 16,
+    "InstallDriverOnStart": true,
+    "Mock": false,
+    "DefinitionsPath": ""
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.Hosting.Lifetime": "Information"
+    },
+    "EventLog": {
+      "LogLevel": {
+        "Default": "Information"
+      }
+    }
+  }
+}
+```
+
+In this scenario, GEX is configured to send to 192.168.2.210, and the bridge is configured to reply back to the GEX host machine (192.168.2.205).
+Windows firewall must allow UDP inbound traffic on both machines, meaning that on the bridge machine, it must allow traffic from 192.168.2.205 on port 8010, and conversely on the GEX machine, the firewall must allow inbound UDP traffic coming from the bridge machine 192.168.2.210 on port 8011.
+
+This is an advanced scenario and is atypical as localhost is meant to be the default setup.
 
 ## Control messages: first argument is the value
 
@@ -292,7 +367,7 @@ This DirectInput check queries Windows capabilities; it is distinct from reading
 
 ## Publish and install
 
-Release builds can optionally create `GEXMaestroBridgeSetup-<version>-x64.exe` with `dotnet build -c Release -p:BuildInstaller=true`. Use `-p:PublishGitHubRelease=true` to also publish the setup to GitHub under a tag matching the project's `Version` (for example, `0.1.0`). See [installer build and release options](installer/README.md) for requirements, authentication, and output locations.
+Release builds can optionally create `GEXMaestroBridgeSetup-<version>-x64.exe` with `dotnet build -c Release -p:BuildInstaller=true`. Use `-p:PublishGitHubRelease=true` to also publish the setup to GitHub under a tag matching the project's `Version` (for example, `0.1.1`). See [installer build and release options](installer/README.md) for requirements, authentication, and output locations.
 
 From the project root, publish an x64 self-contained folder:
 
@@ -311,11 +386,20 @@ Stop-Service GEXMaestroBridgeService
 Start-Service GEXMaestroBridgeService
 ```
 
-The install script copies to Program Files, restricts write access to Administrators/SYSTEM, secures the ProgramData definitions directory, registers the service and starts it. It does not install a firewall rule because the default listener is loopback. Stop/uninstall an existing deployment before replacing its files. Service restart recreates enabled definitions, while service stop disposes owned controllers.
+The install script copies to `C:\GremlinEx\GEXMaestroBridge`, restricts write access to Administrators/SYSTEM, secures the ProgramData definitions directory, registers the service and starts it. It does not install a firewall rule; configure one for LAN access. Stop/uninstall an existing deployment before replacing its files. Service restart recreates enabled definitions, while service stop disposes owned controllers.
 
 ```powershell
 .\scripts\uninstall-service.ps1
 ```
+
+The same service scripts can be run from Windows Command Prompt:
+
+```cmd
+scripts\install-service.cmd -PublishDirectory ".\publish"
+scripts\uninstall-service.cmd
+```
+
+Command Prompt launchers are also available for the installer build, release, configuration, upgrade, and validation scripts. See [Windows Command Prompt scripts](installer/README.md#windows-command-prompt-scripts).
 
 Uninstall removes the service registration; published files and saved definitions are retained.
 

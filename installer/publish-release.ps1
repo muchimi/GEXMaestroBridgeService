@@ -1,6 +1,6 @@
 param(
-    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
-    [Parameter(Mandatory)][string]$Installer
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '',
+    [string]$Installer = ''
 )
 $ErrorActionPreference = 'Stop'
 $script:Repository = 'muchimi/GEXMaestroBridgeService'
@@ -89,17 +89,40 @@ function Publish-BridgeRelease {
         $page++
     } while ($batch.Count -eq 100)
     $existing = @($assets | Where-Object { $_.name -ieq $file.Name })
-    if ($existing.Count) {
-        if ($existing.Count -ne 1 -or $existing[0].digest -ine $digest -or $existing[0].size -ne $file.Length -or $existing[0].state -ne 'uploaded') {
-            throw 'A different or incomplete setup already exists for this version. Increment Version before publishing a changed installer.'
-        }
+    $identical = $existing.Count -eq 1 -and $existing[0].digest -ieq $digest -and
+        $existing[0].size -eq $file.Length -and $existing[0].state -eq 'uploaded'
+    if ($identical) {
         Write-Host 'This exact installer is already uploaded.'
     } else {
-        if ($release.immutable) { throw 'The release is immutable and cannot accept an installer.' }
-        $assetPath = "releases/$($release.id)/assets?name=" + [Uri]::EscapeDataString($file.Name)
+        if ($release.immutable) { throw 'GitHub marks this release as immutable; its installer cannot be added or replaced.' }
+        foreach ($asset in $existing) {
+            if (-not $asset.id -or [string]$asset.id -notmatch '^\d+$') { throw 'An existing installer has no valid GitHub asset ID.' }
+        }
+        $uploadName = $file.Name
+        if ($existing.Count) {
+            # Verify the replacement before removing the currently published file.
+            $uploadName += '.replacement-' + [guid]::NewGuid().ToString('N')
+        }
+        $assetPath = "releases/$($release.id)/assets?name=" + [Uri]::EscapeDataString($uploadName)
         $uploaded = Invoke-GitHubRequest POST $assetPath -Asset $file.FullName
         if ($uploaded.state -ne 'uploaded' -or $uploaded.size -ne $file.Length -or ($uploaded.digest -and $uploaded.digest -ine $digest)) {
             throw 'GitHub did not confirm the complete installer upload. The release remains a draft if newly created.'
+        }
+        if ($existing.Count) {
+            if (-not $uploaded.id -or [string]$uploaded.id -notmatch '^\d+$') { throw 'The replacement upload has no valid GitHub asset ID; the prior installer was retained.' }
+            try {
+                foreach ($asset in $existing) {
+                    Invoke-GitHubRequest DELETE "releases/assets/$($asset.id)" | Out-Null
+                }
+                $renamed = Invoke-GitHubRequest PATCH "releases/assets/$($uploaded.id)" @{name = $file.Name}
+                if ($renamed.name -cne $file.Name -or $renamed.state -ne 'uploaded' -or $renamed.size -ne $file.Length -or
+                    ($renamed.digest -and $renamed.digest -ine $digest)) {
+                    throw 'GitHub did not confirm the replacement installer name and contents.'
+                }
+            } catch {
+                throw "Switching the published installer failed. The verified replacement was uploaded as '$uploadName'. $($_.Exception.Message)"
+            }
+            Write-Host "Replaced the previously uploaded installer for bridge $ReleaseVersion."
         }
     }
     if ($release.draft) {
@@ -108,9 +131,44 @@ function Publish-BridgeRelease {
     Write-Host "Published bridge $ReleaseVersion`: https://github.com/$script:Repository/releases/tag/$ReleaseVersion"
 }
 
+function Resolve-ReleaseVersion {
+    param([string]$RequestedVersion)
+    if ($RequestedVersion) { return $RequestedVersion }
+    $root = Split-Path -Parent $PSScriptRoot
+    $project = Join-Path $root 'src\MaestroOscService\GEXMaestroBridgeService.csproj'
+    $detected = (& dotnet msbuild $project -nologo -getProperty:Version | Select-Object -Last 1).Trim()
+    if ($LASTEXITCODE -ne 0 -or $detected -notmatch '^\d+\.\d+\.\d+$') {
+        throw 'Unable to determine release version from the bridge project.'
+    }
+    return $detected
+}
+
+function Resolve-InstallerPath {
+    param([string]$ReleaseVersion, [string]$RequestedInstaller)
+    $root = Split-Path -Parent $PSScriptRoot
+    if ($RequestedInstaller) {
+        if (-not [IO.Path]::IsPathRooted($RequestedInstaller)) { $RequestedInstaller = Join-Path $root $RequestedInstaller }
+        if (-not (Test-Path -LiteralPath $RequestedInstaller)) { throw "Installer not found: $RequestedInstaller" }
+        return (Resolve-Path -LiteralPath $RequestedInstaller).Path
+    }
+
+    $expectedName = "GEXMaestroBridgeSetup-$ReleaseVersion-x64.exe"
+    $defaultPath = Join-Path $root (Join-Path 'artifacts\installer' $expectedName)
+    if (-not (Test-Path -LiteralPath $defaultPath)) {
+        Write-Host "Installer $expectedName not found. Building installer for version $ReleaseVersion..."
+        & (Join-Path $PSScriptRoot 'build-installer.ps1') -Version $ReleaseVersion
+        if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
+    }
+    if (-not (Test-Path -LiteralPath $defaultPath)) {
+        throw "Installer build completed but expected file is missing: $defaultPath"
+    }
+    return (Resolve-Path -LiteralPath $defaultPath).Path
+}
+
 # Expose release orchestration to tests without credentials or network access.
 if ($MyInvocation.InvocationName -eq '.') { return }
-if (-not (Test-Path -LiteralPath $Installer)) { throw "Installer not found: $Installer" }
+$Version = Resolve-ReleaseVersion $Version
+$Installer = Resolve-InstallerPath $Version $Installer
 $commit = (& git -C (Split-Path -Parent $PSScriptRoot) rev-parse HEAD | Select-Object -Last 1).Trim()
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[a-f0-9]{40,64}$') { throw 'Unable to determine the bridge source commit.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
