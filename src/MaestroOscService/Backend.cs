@@ -26,7 +26,6 @@
   
  */
 
-using HIDMaestro;
 using System.Management;
 
 namespace GEXMaestroBridgeService;
@@ -36,7 +35,8 @@ public sealed record ProfileInfo(string Id, string Name, int VendorId, int Produ
     int? HatLogicalMin, int? HatLogicalMax, int[]? ButtonMap, int HatCount = 1, int AddressableButtons = 32,
     string Kind = "profile", string? UsedProfileName = null);
 public sealed record DeviceInfo(string Id, string ProfileId, string Name, int TransportIndex,
-    bool Controllable = true, string Type = "unknown", ProfileInfo? MaestroProfile = null);
+    bool Controllable = true, string Type = "unknown", ProfileInfo? MaestroProfile = null,
+    string? IdentityKey = null, string? InstanceToken = null, string? HidParentIdPrefix = null, int? FailoverVjoyId = null);
 public sealed record StateInfo(Dictionary<string, float> Axes, long Buttons, int Hat, int[]? PressedButtons = null, int[]? Hats = null);
 
 // All HIDMaestro API methods are called by a single serialized command loop.
@@ -115,7 +115,8 @@ public sealed class MockBackend : IMaestroBackend
 {
     private sealed class Device(string id, ProfileInfo profile, string kind = "profile", string? usedProfileName = null)
     {
-        public DeviceInfo Info = new(id, profile.Id, profile.Name, 0, true, profile.Type, profile);
+        public DeviceInfo Info = GexDeviceIdentity.Describe(
+            new(id, profile.Id, profile.Name, 0, true, profile.Type, profile), GexDeviceIdentity.KeyFor(id, kind == "custom"));
         public ProfileInfo Profile = profile;
         public string Kind = kind;
         public string? UsedProfileName = usedProfileName;
@@ -131,7 +132,10 @@ public sealed class MockBackend : IMaestroBackend
         "gamepad", true, 32, ["X", "Y", "Rx", "Ry", "Z", "Rz"], true, 0, 7, null);
     public void Initialize(bool installDriver) { }
     public IReadOnlyList<ProfileInfo> Profiles() => [_profile];
-    public IReadOnlyList<DeviceInfo> Devices() => _devices.Values.Select(d => d.Info).ToArray();
+    public IReadOnlyList<DeviceInfo> Devices() => _devices.Values.Select(d => d.Info)
+        .OrderBy(d => GexDeviceIdentity.SortOrder(d.Id)).ThenBy(d => d.Id, StringComparer.Ordinal).ToArray();
+    private int NextTransportIndex() => Enumerable.Range(0, _devices.Count + 1)
+        .First(index => _devices.Values.All(d => d.Info.TransportIndex != index));
     private Device Get(string id) => _devices.TryGetValue(id, out var d) ? d : throw new KeyNotFoundException("Unknown service device ID: " + id);
     public DeviceInfo Create(string id, string profileId, string? name = null)
     {
@@ -139,7 +143,9 @@ public sealed class MockBackend : IMaestroBackend
         if (_devices.TryGetValue(id, out var existing))
             return existing.Profile.Id == profileId && existing.Profile.Name == (name ?? _profile.Name) ? existing.Info : throw new InvalidOperationException("Device ID already has a different profile");
         if (profileId != _profile.Id) throw new KeyNotFoundException("Unknown mock profile");
-        var d = new Device(id, _profile with { Name = name ?? _profile.Name }, "profile", _profile.Name); _devices.Add(id, d); return d.Info;
+        var d = new Device(id, _profile with { Name = name ?? _profile.Name }, "profile", _profile.Name);
+        d.Info = d.Info with { TransportIndex = NextTransportIndex() };
+        _devices.Add(id, d); return d.Info;
     }
     public DeviceInfo CreateCustom(string id, string name, int buttons, int axes, int hats, int vendorId, int productId)
     {
@@ -153,7 +159,7 @@ public sealed class MockBackend : IMaestroBackend
         }
         var profile = custom.Capabilities(id, name);
         var d = new Device(id, profile, "custom") { Custom = custom };
-        d.Info = d.Info with { Type = "custom", MaestroProfile = null };
+        d.Info = d.Info with { Type = "custom", MaestroProfile = null, TransportIndex = NextTransportIndex() };
         _devices.Add(id, d); return d.Info;
     }
     public DeviceInfo CreateGamepad(string id, string name)
@@ -161,7 +167,9 @@ public sealed class MockBackend : IMaestroBackend
         BackendValidation.DeviceId(id);
         if (_devices.TryGetValue(id, out var existing))
             return existing.Profile.Id == _wirelessProfile.Id && existing.Profile.Name == name ? existing.Info : throw new InvalidOperationException("Device ID already has a different profile");
-        var d = new Device(id, _wirelessProfile with { Name = name }, "gamepad", _wirelessProfile.Name); _devices.Add(id, d); return d.Info;
+        var d = new Device(id, _wirelessProfile with { Name = name }, "gamepad", _wirelessProfile.Name);
+        d.Info = d.Info with { TransportIndex = NextTransportIndex() };
+        _devices.Add(id, d); return d.Info;
     }
 
 

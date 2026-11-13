@@ -38,7 +38,8 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
 {
     private Dictionary<string, DeviceDefinition> _items = new(StringComparer.Ordinal);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
-    public IReadOnlyList<DeviceDefinition> Definitions() => _items.Values.OrderBy(d => d.Id, StringComparer.Ordinal).ToArray();
+    public IReadOnlyList<DeviceDefinition> Definitions() => _items.Values
+        .OrderBy(d => GexDeviceIdentity.SortOrder(d.Id)).ThenBy(d => d.Id, StringComparer.Ordinal).ToArray();
 
     public void Restore()
     {
@@ -47,17 +48,20 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
             ?? throw new InvalidDataException("Device definitions file is empty");
         if (rows.Length > 256) throw new InvalidDataException("Too many saved definitions");
         var loaded = new Dictionary<string, DeviceDefinition>(StringComparer.Ordinal);
-        foreach (var row in rows)
+        foreach (var saved in rows)
         {
+            var row = saved with { Name = GexDeviceIdentity.DisplayName(saved.Id, saved.Name) };
             Validate(row);
             if (!loaded.TryAdd(row.Id, row)) throw new InvalidDataException("Duplicate device definition: " + row.Id);
         }
         if (loaded.Values.Count(d => d.Enabled) > maxDevices) throw new InvalidDataException("Saved enabled devices exceed MaxDevices");
         _items = loaded;
+        if (!rows.SequenceEqual(Definitions())) Save(loaded.Values);
         foreach (var row in Definitions().Where(d => d.Enabled)) ActivateBackend(row);
     }
     public DeviceInfo DefineAndActivate(DeviceDefinition definition, bool overwrite = false)
     {
+        definition = definition with { Name = GexDeviceIdentity.DisplayName(definition.Id, definition.Name) };
         Validate(definition);
         if (_items.TryGetValue(definition.Id, out var old) && (old with { Enabled = true }) != (definition with { Enabled = true }))
             if (overwrite)
@@ -108,6 +112,8 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
     }
     public DeviceDefinition Rename(string id, string name)
     {
+        if (GexDeviceIdentity.DisplayName(id, name) != name)
+            throw new ArgumentException("A generated GEX joystick name must match its service ID; custom names are supported.");
         var old = Get(id); var updated = old with { Name = name }; Validate(updated);
         if (old.Name == name) return old;
         bool active = backend.Devices().Any(d => d.Id == id);
@@ -163,7 +169,8 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
             string temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                byte[] data = JsonSerializer.SerializeToUtf8Bytes(next.Values.OrderBy(d => d.Id), Json);
+                byte[] data = JsonSerializer.SerializeToUtf8Bytes(next.Values
+                    .OrderBy(d => GexDeviceIdentity.SortOrder(d.Id)).ThenBy(d => d.Id, StringComparer.Ordinal), Json);
                 using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
                 { file.Write(data); file.Flush(flushToDisk: true); }
                 File.Move(temp, path, overwrite: true);

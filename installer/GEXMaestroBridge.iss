@@ -20,6 +20,7 @@ PrivilegesRequired=admin
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\src\MaestroOscService\gex.ico
 LicenseFile=..\licenses\GPL-3.0.txt
 DisableProgramGroupPage=yes
 CloseApplications=yes
@@ -51,15 +52,17 @@ begin
 end;
 
 function ValidPort(S: String): Boolean;
-var 
+var
   N: Integer;
 begin
   // StrToIntDef returns -1 if the string is invalid or letters are passed
   N := StrToIntDef(S, -1);
-  
+
   // Now safely evaluate the network port boundaries
   Result := (N >= 1) and (N <= 65535);
 end;
+
+
 
 function TargetExePath: String; forward;
 

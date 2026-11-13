@@ -34,7 +34,7 @@ public static class SelfTests
 {
     public static void Run()
     {
-        int checks = PortSettingsTests.Run();
+        int checks = PortSettingsTests.Run() + GexDeviceIdentityTests.Run();
         void Check(bool pass, string name) { if (!pass) throw new Exception("FAIL: " + name); checks++; }
         void Reject(byte[] data, string name)
         {

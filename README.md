@@ -2,7 +2,6 @@
 
 A standalone C# Windows Worker Service bridging [GremlinEx (GEX)](https://github.com/muchimi/JoystickGremlinEx) to [HIDMaestro](https://github.com/hifihedgehog/HIDMaestro).
 
-
 The module provides an interface to HID Maestro's API to manage joystick and gamepad devices and to read/write to/from them.
 
 The interface is based on the standard OSC (Open Sound Control) protocol, for two reasons.  First, OSC support is built-in GremlinEx and lets it easily connect to this bridge to manage virtual HID Maestro devices with existing APIs.  Second, it is lightweight and fast and supports multiple parameter types and handshake information for two way communication.   While this interface is created specifically to bridge GremlinEx Python/C++ platform to HIDMaestro's C#/.NET platform, because it is an implementation of the OSC protocol it can be used with any OSC compatible software for the purpose of sending buttons, hats and axis data to HIDMaestro.
@@ -31,7 +30,7 @@ There is no limit imposed by HID Maestro on the number of joysticks, no more tha
 
 There is a hard limit on gamepad devices as the XINPUT standard limits this to four (4) devices (player 1 through 4).
 
-
+The bridge aims to keep the created device deterministic by relative position, meaning the first device created by GEX will be the first one in the Windows device list, the second device will appear after the first device but not necessarily sequentially.  The topic of how Windows orders controllers is out of scope however the bridge aims to keep the sequence as predictable as possible without any ability to manage the operating system's ordering process as this capability is not exposed.
 
 ## OSC configuration
 
@@ -308,9 +307,19 @@ Errors are `/maestro_error` with `[requestId, originalAddress, errorCode, descri
 
 ## Saved definitions and device ownership
 
-Definitions are written atomically to `%ProgramData%\MaestroOscService\devices.json`; mock mode uses `devices.mock.json`. Set Osc:DefinitionsPath to override. Enabled definitions are recreated on startup with stable identity keys `MaestroOscService:{deviceId}` and neutral state. Deactivate marks the definition disabled; delete erases it. Controller input states are not persisted. Corrupt definitions or a failed startup recreation stop startup instead of silently accepting a partial configuration.
+Definitions are written atomically to `%ProgramData%\MaestroOscService\devices.json`; mock mode uses `devices.mock.json`. Set Osc:DefinitionsPath to override. Enabled definitions are recreated on startup with stable identity keys and neutral state. Managed joysticks are restored numerically (`gex-1`, `gex-2`, ..., `gex-16`), before other devices. Deactivate marks the definition disabled; delete erases it. Controller input states are not persisted. Corrupt definitions or a failed startup recreation stop startup instead of silently accepting a partial configuration.
 
 `/maestro_definitions` lists service-defined devices, `/maestro_devices` lists active service-owned devices, and `/maestro_profiles` lists emulation templates. `/maestro_system_devices` is a separate broad, present Windows HID inventory and may include keyboards/mice or related HID interfaces. It is not an exact list of virtual game controllers. PnP IDs and devices owned by another process cannot be passed to control commands; the service does not take over another HIDMaestro context's devices.
+
+### GEX joystick identity and Windows order
+
+Canonical service IDs `gex-1` through `gex-16` use versioned, deterministic identity keys. Each key is chosen so the SDK's hashed instance token and HID parent prefix sort in numeric GEX order. The identity depends on the service ID, independent of the active device count, display name, layout, or Maestro transport slot. Other service IDs retain their previous identity namespaces. Saved generated labels such as a second `gex-1` on service ID `gex-2` are repaired on restoration; custom display names are retained.
+
+Active device responses expose `identityKey`, `instanceToken`, `hidParentIdPrefix`, and `failoverVjoyId`. Updated GremlinEx correlates these tokens against a fresh local HIDAPI scan, preserving the observed Windows order and counting active bridge joysticks even when they are unselected in Gremlin. Automatic local failover requires verified relative order: `gex-2` must follow `gex-1`, `gex-3` must follow `gex-2`, and so on. Other controllers may occur between GEX devices. An active controller absent from the HID scan, ambiguous matches, scan errors, and out-of-order devices prevent automatic failover while explicit Maestro device mappings remain usable. Remote bridge devices have no local Windows enumeration to verify.
+
+The failover mapping remains `vJoy N -> gex-N`, regardless of the Windows enumeration position. Inactive IDs may leave gaps: active `gex-2` and `gex-4` are valid if they enumerate in that order, and still map to vJoy 2 and 4. Gamepads and devices owned by other Maestro clients are outside this GEX joystick ordering policy. Maestro transport indexes and Gremlin's saved slots are separate identifiers.
+
+**Upgrade:** these ordered keys replace the old keys for managed GEX joysticks. Rebuild and restart the bridge to recreate existing controllers with their new instance paths. Windows GUIDs, game bindings, and HIDHide rules tied to the old paths may need to be updated. Subsequent restarts keep the new keys stable. Use the updated bridge and GremlinEx together; older bridges do not supply the identity metadata needed for HID order verification.
 
 ## How the full joystick layout works
 
@@ -337,6 +346,14 @@ C# tests (no hardware):
 ```powershell
 dotnet run --project .\src\MaestroOscService -p:MockOnly=true -- --test
 ```
+
+Run the focused identity/restoration checks independently of the full self-test suite:
+
+```powershell
+dotnet run --project .\tests\IdentityChecks -p:BuildInstaller=false -p:SkipBridgeBuildOutput=true
+```
+
+This compares all 16 derived identities with the installed SDK without creating HID devices. Add `-p:MockOnly=true` to run without the SDK; SDK comparisons are skipped in that mode. A passing check establishes the key policy; the live GremlinEx HID scan verifies the observed Windows order.
 
 In a second terminal while the service runs in mock mode:
 
@@ -412,3 +429,17 @@ Uninstall removes the service registration; published files and saved definition
 - https://github.com/hifihedgehog/HIDMaestro/blob/master/example/SdkDemo/Program.cs
 - https://opensoundcontrol.stanford.edu/spec-1_0.html
 - https://github.com/muchimi/JoystickGremlinEx
+
+## Change log
+
+### 0.1.0
+
+Initial internal release.
+
+### 0.1.1
+
+- Bug fix and naming conventions, gamepad support.
+
+### 0.1.2
+
+- Align bridge API and GEX device naming to Windows device order as much as possible to show GEX created devices in the deterministic order supported by HID Maestro.

@@ -60,12 +60,13 @@ public sealed class HidMaestroBackend : IMaestroBackend
     {
         var profile = Describe(d.Profile);
         bool fromMaestroProfile = d.Custom is null;
-        return new(d.Id, d.Profile.Id, d.Profile.Name, d.Controller.TransportIndex,
-            true, fromMaestroProfile ? profile.Type : "custom", fromMaestroProfile ? profile : null);
+        return GexDeviceIdentity.Describe(new(d.Id, d.Profile.Id, d.Profile.Name, d.Controller.TransportIndex,
+            true, fromMaestroProfile ? profile.Type : "custom", fromMaestroProfile ? profile : null), d.Controller.IdentityKey);
     }
     private Device Get(string id) => _devices.TryGetValue(id, out var d) ? d : throw new KeyNotFoundException("Unknown service device ID: " + id);
     public IReadOnlyList<ProfileInfo> Profiles() => _context.AllProfiles.Select(Describe).ToArray();
-    public IReadOnlyList<DeviceInfo> Devices() => _devices.Values.Select(Describe).ToArray();
+    public IReadOnlyList<DeviceInfo> Devices() => _devices.Values.Select(Describe)
+        .OrderBy(d => GexDeviceIdentity.SortOrder(d.Id)).ThenBy(d => d.Id, StringComparer.Ordinal).ToArray();
     public ProfileInfo Capabilities(string id)
     {
         var d = Get(id);
@@ -95,7 +96,7 @@ public sealed class HidMaestroBackend : IMaestroBackend
             profile = new HMProfileBuilder().FromProfile(profile).Name(name).ProductString(name).DeviceDescription(name).Build();
         }
         // Namespace keys to avoid colliding with another HIDMaestro consumer's identities.
-        var controller = _context.CreateController(profile, "MaestroOscService:" + id);
+        var controller = _context.CreateController(profile, GexDeviceIdentity.KeyFor(id));
         try
         {
             string usedProfileName = _context.GetProfile(profile.Id)?.Name ?? profile.Name;
@@ -121,7 +122,7 @@ public sealed class HidMaestroBackend : IMaestroBackend
             .Vid((ushort)vendorId).Pid((ushort)productId).ProductString(name).ManufacturerString("GEX")
             .DeviceDescription(name).Type("joystick").Connection("usb").Descriptor(custom.Descriptor()).InputReportSize(custom.ReportSize)
             .DeviceModel("none").XInput("{}").Build();
-        var controller = _context.CreateController(profile, "GEX:" + id);
+        var controller = _context.CreateController(profile, GexDeviceIdentity.KeyFor(id, custom: true));
         try
         {
             controller.SubmitRawReport(custom.Report());
