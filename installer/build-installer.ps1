@@ -3,9 +3,14 @@ param(
     [string]$Version = '',
     [string]$HidMaestroDll = '',
     [string]$Iscc = '',
+    [string]$SignToolCommand = '',
     [switch]$PublishRelease
 )
 $ErrorActionPreference = 'Stop'
+if (-not $SignToolCommand) { $SignToolCommand = $env:BRIDGE_SIGNTOOL_COMMAND }
+if ($SignToolCommand -and -not $SignToolCommand.Contains('$f')) {
+    throw 'SignToolCommand must include the Inno Setup $f placeholder for the file to sign.'
+}
 $root = Split-Path -Parent $PSScriptRoot
 if (-not [IO.Path]::IsPathRooted($BridgeProject)) { $BridgeProject = Join-Path $root $BridgeProject }
 if (-not (Test-Path -LiteralPath $BridgeProject)) { throw "Bridge project not found: $BridgeProject" }
@@ -59,10 +64,24 @@ New-Item -ItemType Directory -Path $licenseTarget -Force | Out-Null
 foreach ($name in $requiredLicenses) {
     Copy-Item -LiteralPath (Join-Path $root "licenses\$name") -Destination $licenseTarget -Force
 }
-& $Iscc "/DAppVersion=$Version" "/DPayloadDir=$payload" "/O$output" (Join-Path $PSScriptRoot 'GEXMaestroBridge.iss')
+$compilerArguments = @("/DAppVersion=$Version", "/DPayloadDir=$payload", "/O$output")
+if ($SignToolCommand) {
+    $compilerArguments += @('/DBridgeSigning=1', "/Sgexbridge=$SignToolCommand")
+} else {
+    Write-Warning 'No code-signing command configured. Windows will show Unknown publisher for this unsigned installer. Set BRIDGE_SIGNTOOL_COMMAND or pass -SignToolCommand to sign it.'
+}
+$compilerArguments += (Join-Path $PSScriptRoot 'GEXMaestroBridge.iss')
+& $Iscc @compilerArguments
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
 $installer = Join-Path $output "GEXMaestroBridgeSetup-$Version-x64.exe"
 if (-not (Test-Path -LiteralPath $installer)) { throw 'Compiled installer is missing.' }
+if ($SignToolCommand) {
+    $signature = Get-AuthenticodeSignature -LiteralPath $installer
+    if ($signature.Status -ne 'Valid') {
+        throw "Installer signature is not trusted: $($signature.Status). $($signature.StatusMessage)"
+    }
+    Write-Host "Verified installer publisher: $($signature.SignerCertificate.Subject)"
+}
 Write-Host "Installer built: $installer"
 if ($PublishRelease) {
     & (Join-Path $PSScriptRoot 'publish-release.ps1') -Version $Version -Installer $installer

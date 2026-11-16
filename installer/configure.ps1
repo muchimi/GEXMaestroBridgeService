@@ -21,7 +21,7 @@ if ($Remote -eq 'true') {
 $cfg=Join-Path $InstallDir 'appsettings.json'
 $settings=if(Test-Path $cfg) { Get-Content $cfg -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
 if (-not $settings.PSObject.Properties['Osc']) { $settings | Add-Member NoteProperty Osc ([pscustomobject]@{}) }
-foreach($entry in @{ListenAddress=$listen;ReceivePort=$ListenPort;SendPort=$SendPort;ReplyAddress=$reply;AllowedSenders=$allowed}.GetEnumerator()) {
+foreach($entry in @{ListenAddress=$listen;ReceivePort=$ListenPort;SendPort=$SendPort;ReplyAddress=$reply;AllowedSenders=$allowed;MaxDevices=256}.GetEnumerator()) {
  if($settings.Osc.PSObject.Properties[$entry.Key]) { $settings.Osc.($entry.Key)=$entry.Value }
  else { $settings.Osc | Add-Member NoteProperty $entry.Key $entry.Value }
 }

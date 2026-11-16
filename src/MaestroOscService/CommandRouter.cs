@@ -38,7 +38,7 @@ namespace GEXMaestroBridgeService;
 /// Handles the routing of OSC commands and a reply
 /// </summary>
 /// <param name="backend">the bridge backend interface to HIDMaestro's API</param>
-/// <param name="maxDevices">max number of devices to support, default is 16</param>
+/// <param name="maxDevices">max number of devices to support, default is 256</param>
 /// <param name="systemInventory">a function that returns the current system inventory</param>
 /// <param name="definitions">holds Maestro device definitions</param>
 public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
@@ -93,7 +93,8 @@ public sealed class CommandRouter(IMaestroBackend backend, int maxDevices,
         {
             case "/maestro_ping":
                 Count(m, 1);
-                return [new("/maestro_pong", id, "MaestroOscService", 1)];
+                return [new("/maestro_pong", id, "MaestroOscService", 1,
+                    typeof(CommandRouter).Assembly.GetName().Version?.ToString(3) ?? "unknown")];
             case "/maestro_profiles":
                 return Page(m, id, backend.Profiles().Cast<object>().ToArray(), "/maestro_profile");
             case "/maestro_devices":

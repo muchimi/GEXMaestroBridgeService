@@ -41,10 +41,17 @@ try {
     Assert-True ($testState.StartedService -eq 'GEXMaestroBridgeService') 'Start the newly installed service.'
     $settings = Get-Content -LiteralPath (Join-Path $stage 'appsettings.json') -Raw | ConvertFrom-Json
     Assert-True ($settings.Osc.ListenAddress -eq '127.0.0.1') 'Bind local mode to loopback.'
+    Assert-True ($settings.Osc.MaxDevices -eq 256) 'Enable full capacity for a new installation.'
+    $settings.Osc.MaxDevices = 16
+    $settings | ConvertTo-Json -Depth 20 | Set-Content (Join-Path $stage 'appsettings.json') -Encoding UTF8
 
     $testState.CreatedService = $null
     $testState.StartedService = $null
     & $configure -InstallDir $stage -Mode console
+    $settings = Get-Content -LiteralPath (Join-Path $stage 'appsettings.json') -Raw | ConvertFrom-Json
+    Assert-True ($settings.Osc.MaxDevices -eq 256) 'Upgrade the legacy active-device limit to 256.'
+    $backup = Get-Content -LiteralPath (Join-Path $stage 'appsettings.json.backup') -Raw | ConvertFrom-Json
+    Assert-True ($backup.Osc.MaxDevices -eq 16) 'Preserve the previous limit in the configuration backup.'
     Assert-True (-not $testState.CreatedService -and -not $testState.StartedService) 'Console mode must not create or start a service.'
 
     $testState.ExistingService = [pscustomobject]@{Status='Stopped'}

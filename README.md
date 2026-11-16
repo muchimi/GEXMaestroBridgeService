@@ -122,7 +122,7 @@ Switch prefix can be `--`, `-`, or `/`.
     "ReplyAddress": "",
     "AllowedSenders": ["127.0.0.1"],
     "ReceiveBufferBytes": 1048576,
-    "MaxDevices": 16,
+    "MaxDevices": 256,
     "InstallDriverOnStart": true,
     "Mock": false,
     "DefinitionsPath": ""
@@ -147,7 +147,7 @@ By default, an empty ListenAddress resolves to the host's primary IPv4 address a
     "ReplyAddress": "127.0.0.1",
     "AllowedSenders": ["127.0.0.1"],
     "ReceiveBufferBytes": 1048576,
-    "MaxDevices": 16,
+    "MaxDevices": 256,
     "InstallDriverOnStart": true,
     "Mock": false,
     "DefinitionsPath": ""
@@ -183,7 +183,7 @@ When using localhost (127.0.0.1), no Windows Firewall rules need to be set.
     "ReplyAddress": "192.168.2.205",
     "AllowedSenders": ["192.168.2.205"],
     "ReceiveBufferBytes": 1048576,
-    "MaxDevices": 16,
+    "MaxDevices": 256,
     "InstallDriverOnStart": true,
     "Mock": false,
     "DefinitionsPath": ""
@@ -260,7 +260,7 @@ Management requests use a nonnegative OSC int32 `requestId` first. This is separ
 
 | Request address | Arguments, in order | Reply |
 | --- | --- | --- |
-| `/maestro_ping` | requestId | `/maestro_pong` requestId, service name, protocol version |
+| `/maestro_ping` | requestId | `/maestro_pong` requestId, service name, protocol version, service version (string, same as `--version`) |
 | `/maestro_profiles` | requestId [, offset, limit] | Catalog profile rows and completion |
 | `/maestro_definitions` | requestId [, offset, limit] | All saved definitions, including inactive devices |
 | `/maestro_devices` | requestId [, offset, limit] | Active devices owned by this service |
@@ -313,11 +313,13 @@ Definitions are written atomically to `%ProgramData%\MaestroOscService\devices.j
 
 ### GEX joystick identity and Windows order
 
-Canonical service IDs `gex-1` through `gex-16` use versioned, deterministic identity keys. Each key is chosen so the SDK's hashed instance token and HID parent prefix sort in numeric GEX order. The identity depends on the service ID, independent of the active device count, display name, layout, or Maestro transport slot. Other service IDs retain their previous identity namespaces. Saved generated labels such as a second `gex-1` on service ID `gex-2` are repaired on restoration; custom display names are retained.
+Canonical service IDs `gex-1` through `gex-256` use versioned, deterministic identity keys. Each key is chosen so the SDK's hashed instance token and HID parent prefix sort in numeric GEX order. The identity depends on the service ID, independent of the active device count, display name, layout, or Maestro transport slot. Other service IDs retain their previous identity namespaces. Saved generated labels such as a second `gex-1` on service ID `gex-2` are repaired on restoration; custom display names are retained.
 
 Active device responses expose `identityKey`, `instanceToken`, `hidParentIdPrefix`, and `failoverVjoyId`. Updated GremlinEx correlates these tokens against a fresh local HIDAPI scan, preserving the observed Windows order and counting active bridge joysticks even when they are unselected in Gremlin. Automatic local failover requires verified relative order: `gex-2` must follow `gex-1`, `gex-3` must follow `gex-2`, and so on. Other controllers may occur between GEX devices. An active controller absent from the HID scan, ambiguous matches, scan errors, and out-of-order devices prevent automatic failover while explicit Maestro device mappings remain usable. Remote bridge devices have no local Windows enumeration to verify.
 
 The failover mapping remains `vJoy N -> gex-N`, regardless of the Windows enumeration position. Inactive IDs may leave gaps: active `gex-2` and `gex-4` are valid if they enumerate in that order, and still map to vJoy 2 and 4. Gamepads and devices owned by other Maestro clients are outside this GEX joystick ordering policy. Maestro transport indexes and Gremlin's saved slots are separate identifiers.
+
+For GEX gamepads, GremlinEx correlates HID and XUSB interfaces by the SDK's Windows container or instance identity and publishes one device row. Native input keeps its DirectInput layout; output selectors retain the bridge's addressable axes/buttons. Unselected local gamepads are also reconciled as native inputs. Saved generated gamepad labels are repaired to match their service IDs (`gex-gp-2` cannot inherit a duplicated `gex-gp-1` label); custom labels and gamepad instance keys are preserved.
 
 **Upgrade:** these ordered keys replace the old keys for managed GEX joysticks. Rebuild and restart the bridge to recreate existing controllers with their new instance paths. Windows GUIDs, game bindings, and HIDHide rules tied to the old paths may need to be updated. Subsequent restarts keep the new keys stable. Use the updated bridge and GremlinEx together; older bridges do not supply the identity metadata needed for HID order verification.
 
@@ -443,3 +445,9 @@ Initial internal release.
 ### 0.1.2
 
 - Align bridge API and GEX device naming to Windows device order as much as possible to show GEX created devices in the deterministic order supported by HID Maestro.
+
+The bridge defaults to 256 total active devices (including gamepads). HIDMaestro itself has no fixed joystick maximum. The installer updates Osc:MaxDevices to 256, including existing configurations with the legacy limit of 16. For manual deployments, set Osc:MaxDevices to 256 in appsettings.json and restart the bridge. Only gex-1 through gex-16 have numeric vJoy failover aliases; higher IDs remain direct Maestro outputs. The first sixteen durable keys are preserved.
+
+This is bridge/HID capacity, not a guarantee that Windows exposes every device through DirectInput or `joy.cpl`. Check a running configuration with `python tests/verify_dinput.py --gex-order --count 20` (substitute the expected active GEX count). The verifier compares the GEX products in Windows raw input with DirectInput and fails if a device is missing, even when the visible subset is in numeric order. `--count` also works with `--name` for a specific inventory. Run it from the same account and account for application-specific HidHide visibility.
+
+On the November 16, 2026 live setup, the bridge, HIDAPI and Windows raw input exposed 20 GEX joysticks, while DirectInput and `joy.cpl` exposed ten. Removing a visible GEX joystick admitted the next one; changing VID/PID or reducing its layout did not bypass the cutoff. Five vJoy devices and another controller were also present, and WinMM reported 16 supported slots. Raising `Osc:MaxDevices` does not change those Windows registrations. Use the verifier to distinguish successful HID creation from availability to a particular Windows API; a partial DirectInput inventory must not be reported as a successful 20-device test.

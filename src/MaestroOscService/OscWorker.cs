@@ -40,7 +40,7 @@ public sealed class OscOptions
     public string ReplyAddress { get; set; } = "";
     public string[] AllowedSenders { get; set; } = [];
     public int ReceiveBufferBytes { get; set; } = 1048576;
-    public int MaxDevices { get; set; } = 16;
+    public int MaxDevices { get; set; } = GexDeviceIdentity.MaxDevices;
     public bool InstallDriverOnStart { get; set; } = true;
     public bool Mock { get; set; }
     public string DefinitionsPath { get; set; } = "";

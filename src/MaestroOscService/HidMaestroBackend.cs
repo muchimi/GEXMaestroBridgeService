@@ -71,7 +71,8 @@ public sealed class HidMaestroBackend : IMaestroBackend
     {
         var d = Get(id);
         if (d.Custom is not null)
-            return d.Custom.Capabilities(id, d.Profile.Name) with { Kind = d.Kind, UsedProfileName = null };
+            return d.Custom.Capabilities(id, d.Profile.Name) with {
+                VendorId = d.Profile.VendorId, ProductId = d.Profile.ProductId, Kind = d.Kind, UsedProfileName = null };
         return Describe(d.Profile) with { Kind = d.Kind, UsedProfileName = d.UsedProfileName };
     }
     public StateInfo State(string id)
@@ -80,6 +81,23 @@ public sealed class HidMaestroBackend : IMaestroBackend
         if (d.Custom is not null) return d.Custom.State();
         return new(d.State.Axes!.ToDictionary(x => x.Key.ToString(), x => x.Value), (uint)d.State.Buttons, d.HatDirection);
     }
+    internal static HMProfile PrepareProfile(HMProfile profile, string id, string? name)
+    {
+        var builder = new HMProfileBuilder().FromProfile(profile);
+        if (name is not null)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name.Length > 128) throw new ArgumentException("Name must have 1..128 characters");
+            builder.Name(name).ProductString(name).DeviceDescription(name);
+        }
+        if (profile.Id == "xbox-360-wireless" && GexDeviceIdentity.GamepadNumber(id) != null)
+        {
+            // Change the HID/OEM identity only. FromProfile retains the wireless
+            // xinput.information 045E:0719 and capabilities used by the XUSB INF.
+            builder.Vid(GexDeviceIdentity.VendorId).Pid((ushort)GexDeviceIdentity.ProductId(id)!.Value);
+        }
+        return builder.Build();
+    }
+
     public DeviceInfo Create(string id, string profileId, string? name = null)
     {
         BackendValidation.DeviceId(id);
@@ -90,11 +108,7 @@ public sealed class HidMaestroBackend : IMaestroBackend
         if (!profile.IsDeployable) throw new ArgumentException("Profile has no deployable descriptor");
         if (profile.Type.Equals("keyboard", StringComparison.OrdinalIgnoreCase) || profile.Type.Equals("mouse", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("This bridge supports controller profiles, not keyboard/mouse reports");
-        if (name is not null)
-        {
-            if (string.IsNullOrWhiteSpace(name) || name.Length > 128) throw new ArgumentException("Name must have 1..128 characters");
-            profile = new HMProfileBuilder().FromProfile(profile).Name(name).ProductString(name).DeviceDescription(name).Build();
-        }
+        profile = PrepareProfile(profile, id, name);
         // Namespace keys to avoid colliding with another HIDMaestro consumer's identities.
         var controller = _context.CreateController(profile, GexDeviceIdentity.KeyFor(id));
         try
@@ -115,7 +129,8 @@ public sealed class HidMaestroBackend : IMaestroBackend
         if (_devices.TryGetValue(id, out var existing))
         {
             if (existing.Custom is not null && existing.Custom.ButtonCount == buttons && existing.Custom.AxisCount == axes &&
-                existing.Custom.HatCount == hats && existing.Profile.Name == name) return Describe(existing);
+                existing.Custom.HatCount == hats && existing.Profile.Name == name &&
+                existing.Profile.VendorId == vendorId && existing.Profile.ProductId == productId) return Describe(existing);
             throw new InvalidOperationException("Device ID has a different definition");
         }
         var profile = new HMProfileBuilder().Id("gex-" + id).Name(name).Vendor("GEX")

@@ -157,7 +157,7 @@ public sealed class MockBackend : IMaestroBackend
                 return prior.Info;
             throw new InvalidOperationException("Device ID has a different definition");
         }
-        var profile = custom.Capabilities(id, name);
+        var profile = custom.Capabilities(id, name) with { VendorId = vendorId, ProductId = productId };
         var d = new Device(id, profile, "custom") { Custom = custom };
         d.Info = d.Info with { Type = "custom", MaestroProfile = null, TransportIndex = NextTransportIndex() };
         _devices.Add(id, d); return d.Info;
@@ -167,7 +167,10 @@ public sealed class MockBackend : IMaestroBackend
         BackendValidation.DeviceId(id);
         if (_devices.TryGetValue(id, out var existing))
             return existing.Profile.Id == _wirelessProfile.Id && existing.Profile.Name == name ? existing.Info : throw new InvalidOperationException("Device ID already has a different profile");
-        var d = new Device(id, _wirelessProfile with { Name = name }, "gamepad", _wirelessProfile.Name);
+        var profile = _wirelessProfile with { Name = name };
+        if (GexDeviceIdentity.GamepadNumber(id) != null)
+            profile = profile with { VendorId = GexDeviceIdentity.VendorId, ProductId = GexDeviceIdentity.ProductId(id)!.Value };
+        var d = new Device(id, profile, "gamepad", _wirelessProfile.Name);
         d.Info = d.Info with { TransportIndex = NextTransportIndex() };
         _devices.Add(id, d); return d.Info;
     }
@@ -185,7 +188,8 @@ public sealed class MockBackend : IMaestroBackend
     {
         var d = Get(id);
         if (d.Custom is not null)
-            return d.Custom.Capabilities(id, d.Profile.Name) with { Kind = d.Kind, UsedProfileName = null };
+            return d.Custom.Capabilities(id, d.Profile.Name) with {
+                VendorId = d.Profile.VendorId, ProductId = d.Profile.ProductId, Kind = d.Kind, UsedProfileName = null };
         return d.Profile with { Kind = d.Kind, UsedProfileName = d.UsedProfileName };
     }
     public StateInfo State(string id) { var d = Get(id); return d.Custom?.State() ?? new(new(d.Axes), d.Buttons, d.Hat); }

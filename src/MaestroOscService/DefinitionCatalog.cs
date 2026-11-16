@@ -48,9 +48,9 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
             ?? throw new InvalidDataException("Device definitions file is empty");
         if (rows.Length > 256) throw new InvalidDataException("Too many saved definitions");
         var loaded = new Dictionary<string, DeviceDefinition>(StringComparer.Ordinal);
-        foreach (var saved in rows)
+        foreach (var saved in rows.OrderBy(d => GexDeviceIdentity.SortOrder(d.Id)).ThenBy(d => d.Id, StringComparer.Ordinal))
         {
-            var row = saved with { Name = GexDeviceIdentity.DisplayName(saved.Id, saved.Name) };
+            var row = NormalizeDefinition(saved, loaded.Values.Concat(rows.Where(d => d.ProductId != 1)));
             Validate(row);
             if (!loaded.TryAdd(row.Id, row)) throw new InvalidDataException("Duplicate device definition: " + row.Id);
         }
@@ -61,7 +61,7 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
     }
     public DeviceInfo DefineAndActivate(DeviceDefinition definition, bool overwrite = false)
     {
-        definition = definition with { Name = GexDeviceIdentity.DisplayName(definition.Id, definition.Name) };
+        definition = NormalizeDefinition(definition, _items.Values);
         Validate(definition);
         if (_items.TryGetValue(definition.Id, out var old) && (old with { Enabled = true }) != (definition with { Enabled = true }))
             if (overwrite)
@@ -144,6 +144,25 @@ public sealed class DefinitionCatalog(IMaestroBackend backend, int maxDevices, s
         "gamepad" => backend.CreateGamepad(d.Id, d.Name),
         _ => backend.Create(d.Id, d.ProfileId, d.Name)
     };
+
+    private static DeviceDefinition NormalizeDefinition(DeviceDefinition d, IEnumerable<DeviceDefinition> existing)
+    {
+        d = GexDeviceIdentity.Normalize(d);
+        // Named custom IDs have no numeric GEX slot. Allocate once from a third
+        // family and persist it; a rename, edit or restart must not reassign it.
+        var rows = existing.ToArray();
+        if (d.VendorId == GexDeviceIdentity.VendorId && d.ProductId is >= 0x4701 and <= 0x49FF &&
+            rows.Any(row => row.Id != d.Id && row.VendorId == d.VendorId && row.ProductId == d.ProductId))
+            throw new InvalidOperationException($"GEX product ID 0x{d.ProductId:X4} is already assigned to another device");
+        if (d.Kind != "custom" || d.VendorId != GexDeviceIdentity.VendorId || d.ProductId != 1) return d;
+        var prior = rows.FirstOrDefault(row => row.Id == d.Id && row.VendorId == d.VendorId &&
+            row.ProductId is >= 0x4901 and <= 0x49FF);
+        if (prior != null) return d with { ProductId = prior.ProductId };
+        var occupied = rows.Where(row => row.Id != d.Id && row.VendorId == d.VendorId).Select(row => row.ProductId).ToHashSet();
+        int pid = Enumerable.Range(0x4901, 255).FirstOrDefault(pid => !occupied.Contains(pid));
+        if (pid == 0) throw new InvalidOperationException("GEX named custom product IDs are exhausted");
+        return d with { ProductId = pid };
+    }
 
     private static void Validate(DeviceDefinition d)
     {

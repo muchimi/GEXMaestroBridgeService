@@ -70,6 +70,13 @@ public static class SelfTests
             var reply = Control(address);
             return reply.Address == address && Equals(reply.Arguments.Single(), expected);
         }
+        var pong = OscCodec.Decode(OscCodec.Encode(Call("/maestro_ping"))).Single();
+        Check(pong.Address == "/maestro_pong" && pong.Arguments.Length == 4 &&
+            pong.Arguments.Take(3).SequenceEqual(new object[] { id, "MaestroOscService", 1 }),
+            "ping preserves request ID, service name and protocol version");
+        Check(pong.Arguments[3] is string serviceVersion &&
+            serviceVersion == typeof(CommandRouter).Assembly.GetName().Version!.ToString(3),
+            "ping returns the running service version as an OSC string");
         Check(Call("/maestro_create", "pad", "mock-gamepad", "Named pad").Address == "/maestro_created", "named console create");
         Check(backend.Devices().Single().Name == "Named pad", "console name");
         Check(Call("/maestro_create", "pad", "mock-gamepad", "Named pad").Address == "/maestro_created", "idempotent create");

@@ -25,20 +25,24 @@ public static class GexDeviceIdentityTests
         }
         Check(GexDeviceIdentity.KeyFor("another-client", true) == "GEX:another-client", "other custom identities unchanged");
         Check(GexDeviceIdentity.KeyFor("gex-gp-1") == "MaestroOscService:gex-gp-1", "gamepad identity namespace unchanged");
-        Check(GexDeviceIdentity.JoystickNumber("gex-0") is null && GexDeviceIdentity.JoystickNumber("gex-17") is null &&
-              GexDeviceIdentity.JoystickNumber("gex-01") is null, "only canonical joystick IDs 1..16 are ordered");
+        Check(GexDeviceIdentity.JoystickNumber("gex-0") is null && GexDeviceIdentity.JoystickNumber("gex-257") is null &&
+              GexDeviceIdentity.JoystickNumber("gex-01") is null, "only canonical joystick IDs 1..256 are ordered");
 
 #if !MOCK_ONLY
         // Compare with the shipped SDK without creating, installing or opening devices.
         Type sdkIdentity = typeof(HIDMaestro.HMContext).Assembly.GetType("HIDMaestro.Internal.DeviceIdentity", throwOnError: true)!;
         var forKey = sdkIdentity.GetMethod("ForKey", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!;
-        foreach (string key in keys)
+        foreach (string key in keys.Concat(Enumerable.Range(1, 4).Select(n => GexDeviceIdentity.KeyFor($"gex-gp-{n}"))))
         {
             object identity = forKey.Invoke(null, [key, 0])!;
             Check((string)sdkIdentity.GetProperty("Token")!.GetValue(identity)! == GexDeviceIdentity.InstanceToken(key),
                 "ordered token agrees with installed HIDMaestro SDK");
             Check((string)sdkIdentity.GetProperty("ParentIdPrefix")!.GetValue(identity)! == GexDeviceIdentity.ParentIdPrefix(key),
                 "ordered HID prefix agrees with installed HIDMaestro SDK");
+            string tokenHash = GexDeviceIdentity.InstanceToken(key)[3..];
+            Check((Guid)sdkIdentity.GetProperty("ContainerId")!.GetValue(identity)! ==
+                  Guid.Parse($"48494430-4d41-4553-{tokenHash[..4]}-{tokenHash[4..]}"),
+                "Gremlin HID/XUSB container correlation agrees with the installed SDK");
         }
 #endif
 
@@ -74,8 +78,22 @@ public static class GexDeviceIdentityTests
             catch (ArgumentException) { rejected = true; }
             Check(rejected && backend.Devices().Single(d => d.Id == "gex-2").Name == "Pilot controls",
                 "a generated label cannot contradict its service identity");
+            string gamepadFile = Path.Combine(directory, "gamepads.json");
+            File.WriteAllText(gamepadFile, JsonSerializer.Serialize(new[] {
+                new DeviceDefinition("gex-gp-2", "gamepad", "xbox-360-wireless", "gex-gp-1"),
+                new DeviceDefinition("gex-gp-1", "gamepad", "xbox-360-wireless", "gex-gp-1"),
+            }));
+            using var gamepads = new MockBackend();
+            var gamepadCatalog = new DefinitionCatalog(gamepads, 4, gamepadFile);
+            gamepadCatalog.Restore();
+            Check(gamepads.Devices().All(d => d.Name == d.Id), "duplicated generated gamepad labels follow their own service IDs");
+            var padBefore = gamepads.Devices().Single(d => d.Id == "gex-gp-2");
+            gamepadCatalog.Rename("gex-gp-2", "Copilot controls");
+            var padAfter = gamepads.Devices().Single(d => d.Id == "gex-gp-2");
+            Check(padAfter.Name == "Copilot controls" && padAfter.InstanceToken == padBefore.InstanceToken,
+                "custom gamepad labels retain their Windows identity");
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
-        return checks;
+        return checks + GexProductIdentityTests.Run() + GexCapacityTests.Run();
     }
 }

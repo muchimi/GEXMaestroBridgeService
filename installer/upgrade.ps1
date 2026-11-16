@@ -17,12 +17,13 @@ function StopBridge {
  if($processes.Count) { throw 'Close the running bridge console application before upgrading.' }
 }
 if($Action -eq 'prepare') {
+ if((Test-Path $stateFile) -and -not (Test-Path (Join-Path $stateDir 'backup'))) { Remove-Item $stateFile -Force }
  if(Test-Path $stateFile) { throw 'An earlier upgrade is pending. Resolve or roll it back first.' }
  $existing=Join-Path $InstallDir 'GEXMaestroBridgeService.exe'
  if(-not (Test-Path $existing)) { exit 0 }
  $oldVersion=(& $existing --version | Select-Object -Last 1).Trim()
  if($LASTEXITCODE -ne 0 -or $oldVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Cannot determine installed bridge version.' }
- if([version]$Version -le [version]$oldVersion) { throw "Refusing same-version install or downgrade ($oldVersion -> $Version)." }
+  if([version]$Version -lt [version]$oldVersion) { throw "Refusing downgrade ($oldVersion -> $Version)." }
  $svc=Get-Service $service -ErrorAction SilentlyContinue
  $wasRunning=($svc -and $svc.Status -eq 'Running')
  StopBridge

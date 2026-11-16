@@ -68,7 +68,7 @@ public sealed record StartupArguments(int? ReceivePort, int? OutputPort, bool Mo
           --Osc:ReplyAddress <IPv4>           Fixed reply IP; blank config uses sender IP.
           --Osc:AllowedSenders:<index> <IPv4> Allowed sender, indexed from 0.
           --Osc:DefinitionsPath <path>        Saved device definitions file.
-          --Osc:MaxDevices <number>           Device limit, 1..256 (default 16).
+          --Osc:MaxDevices <number>           Device limit, 1..256 (default 256).
           --Osc:ReceiveBufferBytes <number>   Buffer, 65536..16777216 (default 1048576).
           --Osc:InstallDriverOnStart <bool>   Request driver installation (default true).
           --Osc:Mock <bool>                   Select mock backend (default false).

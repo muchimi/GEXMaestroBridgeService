@@ -288,7 +288,7 @@ Use this when GremlinEx and the bridge run on the same computer. GremlinEx sends
     "ReplyAddress": "127.0.0.1",
     "AllowedSenders": ["127.0.0.1"],
     "ReceiveBufferBytes": 1048576,
-    "MaxDevices": 16,
+    "MaxDevices": 256,
     "InstallDriverOnStart": true,
     "Mock": false,
     "DefinitionsPath": ""
@@ -318,7 +318,7 @@ This example assumes the bridge computer owns `192.168.1.20` and GremlinEx runs 
     "ReplyAddress": "192.168.1.50",
     "AllowedSenders": ["192.168.1.50"],
     "ReceiveBufferBytes": 1048576,
-    "MaxDevices": 16,
+    "MaxDevices": 256,
     "InstallDriverOnStart": true,
     "Mock": false,
     "DefinitionsPath": ""
@@ -361,7 +361,7 @@ For service mode, use the service configuration examples in the first section to
 | `--Osc:ReplyAddress <IPv4>` | Send all replies to this address. If blank in configuration, reply to each request sender's IP. |
 | `--Osc:AllowedSenders:<index> <IPv4>` | Permitted sender at a zero-based index: `:0`, `:1`, `:2`, and so on. An empty configured list allows any sender; overrides replace individual array entries. |
 | `--Osc:DefinitionsPath <path>` | Saved device definitions file. Use an absolute path for consistent console and service behavior. |
-| `--Osc:MaxDevices <number>` | Device limit, from 1 through 256. Default: 16. |
+| `--Osc:MaxDevices <number>` | Device limit, from 1 through 256. Default: 256. |
 | `--Osc:ReceiveBufferBytes <number>` | Receive buffer size, from 65536 through 16777216 bytes. Default: 1048576. |
 | `--Osc:InstallDriverOnStart <true\|false>` | Whether the real backend requests driver installation at startup. Default: true. Real device operations still require elevation when false. |
 | `--Osc:Mock <true\|false>` | Select the backend through configuration. Default: false. `--mock` always forces mock mode for that invocation. |

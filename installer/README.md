@@ -34,6 +34,19 @@ The setup can also be built directly:
 .\installer\build-installer.ps1 -PublishRelease
 ```
 
+## Windows verified publisher
+
+`AppPublisher=EMCS` supplies the installer metadata. Windows UAC shows **Unknown publisher** until the executable has a valid Authenticode signature from a certificate trusted on the target computer. The verified publisher comes from that certificate's identity.
+
+Set `BRIDGE_SIGNTOOL_COMMAND` or pass `-SignToolCommand` with your certificate or signing-service command. Include Inno Setup's literal `$f` placeholder for the file to sign; use `$q` for quotes around paths containing spaces. For example, using a signing wrapper already configured for your trusted certificate:
+
+```powershell
+$env:BRIDGE_SIGNTOOL_COMMAND = '$qC:\Signing\sign-bridge.cmd$q $f'
+.\installer\build-installer.ps1
+```
+
+The wrapper must return a nonzero exit code on failure. Inno Setup signs the installer, its temporary executables, and the uninstaller during compilation. The build verifies the finished installer's Authenticode signature before reporting success or publishing it. The environment setting also applies when packaging through `dotnet build -p:BuildInstaller=true`. Without a signing command, the build emits an unsigned installer and a warning.
+
 ## Windows Command Prompt scripts
 
 Every PowerShell script under `installer` and `scripts` has a matching `.cmd` launcher. The launchers run the same PowerShell implementation, forward all arguments, and return its exit code. They use Windows PowerShell 5.1 included with Windows. Run them from Command Prompt (`cmd.exe`); use an elevated terminal for installation, service, firewall, and upgrade operations.
@@ -60,7 +73,7 @@ installer\test-configure.cmd
 
 | Command Prompt launcher | Purpose |
 | --- | --- |
-| `installer\build-installer.cmd` | Build the installer; accepts `-Version`, `-BridgeProject`, `-HidMaestroDll`, `-Iscc`, and `-PublishRelease`. |
+| `installer\build-installer.cmd` | Build the installer; accepts `-Version`, `-BridgeProject`, `-HidMaestroDll`, `-Iscc`, `-SignToolCommand`, and `-PublishRelease`. |
 | `installer\publish-release.cmd` | Publish or replace the versioned installer; accepts `-Version` and `-Installer`. |
 | `installer\configure.cmd` | Configure a deployed bridge; accepts the same required `-InstallDir` and network/service options as `configure.ps1`. |
 | `installer\upgrade.cmd` | Run the upgrade helper with `-InstallDir`, `-Version`, and `-Action prepare`, `rollback`, or `complete`. |

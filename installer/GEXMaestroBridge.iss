@@ -9,6 +9,11 @@
 AppId={{D26DA10A-73A7-482A-A711-6B7E04C8D8A0}
 AppName={#AppName}
 AppVersion={#AppVersion}
+AppPublisher=EMCS
+#ifdef BridgeSigning
+SignTool=gexbridge
+SignedUninstaller=yes
+#endif
 VersionInfoVersion={#AppVersion}.0
 DefaultDirName=C:\GremlinEx\GEXMaestroBridge
 DefaultGroupName=GEX Maestro Bridge
@@ -135,14 +140,24 @@ begin
   Result := AddBackslash(WizardDirValue) + 'GEXMaestroBridgeService.exe';
 end;
 
-function RunUpgrade(Action: String): Boolean;
-var Params: String; ResultCode: Integer;
+function RunUpgrade(Action: String; var FailureText: String): Boolean;
+var Params, CmdArgs, LogPath: String; OutputText: AnsiString; ResultCode: Integer;
 begin
+  FailureText := '';
+  LogPath := ExpandConstant('{tmp}\upgrade-' + Action + '.log');
+  if FileExists(LogPath) then DeleteFile(LogPath);
   Params := '-NoProfile -ExecutionPolicy Bypass -File ' +
     PsQuote(ExpandConstant('{tmp}\upgrade.ps1')) +
     ' -InstallDir ' + PsQuote(ExpandConstant('{app}')) +
     ' -Action ' + Action + ' -Version {#AppVersion}';
-  Result := Exec('powershell.exe', Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  CmdArgs := '/C powershell.exe ' + Params + ' > ' + PsQuote(LogPath) + ' 2>&1';
+  Result := Exec(ExpandConstant('{cmd}'), CmdArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  if not Result then begin
+    if LoadStringFromFile(LogPath, OutputText) then begin
+      FailureText := Trim(String(OutputText));
+    end;
+    if FailureText = '' then FailureText := 'Exit code: ' + IntToStr(ResultCode);
+  end;
 end;
 
 procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
@@ -150,14 +165,14 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
-var Params, Mode, Remote, Scope: String; ResultCode: Integer;
+var Params, Mode, Remote, Scope, UpgradeError: String; ResultCode: Integer;
 begin
   if CurStep = ssInstall then begin
     ExtractTemporaryFile('upgrade.ps1');
     UpgradePending := FileExists(ExpandConstant('{app}\GEXMaestroBridgeService.exe'));
     if UpgradePending then begin
-      if not RunUpgrade('prepare') then
-        RaiseException('Could not prepare the existing bridge for upgrade. Close the console or check the service.');
+      if not RunUpgrade('prepare', UpgradeError) then
+        RaiseException('Could not prepare the existing bridge for upgrade.' + #13#10 + UpgradeError);
       UpgradePrepared := True;
     end;
   end;
@@ -167,7 +182,7 @@ begin
         if not Exec('sc.exe', 'start GEXMaestroBridgeService', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
           RaiseException('Could not restart upgraded bridge service.');
       end;
-      if not RunUpgrade('complete') then RaiseException('Upgrade cleanup failed.');
+      if not RunUpgrade('complete', UpgradeError) then RaiseException('Upgrade cleanup failed.' + #13#10 + UpgradeError);
       UpgradePrepared := False;
       exit;
     end;
@@ -186,8 +201,9 @@ begin
 end;
 
 procedure DeinitializeSetup();
+var UpgradeError: String;
 begin
-  if UpgradePrepared then RunUpgrade('rollback');
+  if UpgradePrepared then RunUpgrade('rollback', UpgradeError);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
